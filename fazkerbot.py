@@ -7,8 +7,9 @@ import requests
 from pytz import timezone
 
 # Set up bot and chat details
-TOKEN = "7365741617:AAE_TGjBcXAt81r5Hfe4rFlci-Os0q50nPk"  # Use the actual bot token
-CHAT_ID = "-1002450375757"  # Use the actual chat ID for your private channel
+import os
+TOKEN = os.getenv("TELEGRAM_TOKEN")  # Replace with environment variable
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")  # Replace with environment variable
 bot = telegram.Bot(token=TOKEN)
 
 # Folder paths for images
