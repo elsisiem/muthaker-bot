@@ -7,15 +7,15 @@ import requests
 from pytz import timezone
 
 # Set up bot and chat details
-import os
-TOKEN = os.getenv("TELEGRAM_TOKEN")  # Replace with environment variable
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")  # Replace with environment variable
+TOKEN = os.getenv("TELEGRAM_TOKEN")  # Use the environment variable for the bot token
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")  # Use the environment variable for the chat ID
 bot = telegram.Bot(token=TOKEN)
 
-# Folder paths for images
-QURAN_PAGES_FOLDER = r'C:\Users\hatem\OneDrive\Desktop\FazkerBot\المصحف'
-ATHKAR_FOLDER = r'C:\Users\hatem\OneDrive\Desktop\FazkerBot\الأذكار'
-FASTING_FOLDER = r'C:\Users\hatem\OneDrive\Desktop\FazkerBot\الصيام'
+# Folder paths for images (adjusted for GitHub repository structure)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # Base directory of the script
+QURAN_PAGES_FOLDER = os.path.join(BASE_DIR, 'المصحف')  # Adjusted path
+ATHKAR_FOLDER = os.path.join(BASE_DIR, 'الأذكار')  # Adjusted path
+FASTING_FOLDER = os.path.join(BASE_DIR, 'الصيام')  # Adjusted path
 
 # Quran page counter, starting from 196
 quran_page_number = 196
@@ -45,8 +45,8 @@ async def send_image(image_path, caption=""):
 # Async function to send Quran pages
 async def send_quran_pages():
     global quran_page_number
-    page_1 = f'{QURAN_PAGES_FOLDER}\\photo_{quran_page_number}.jpg'
-    page_2 = f'{QURAN_PAGES_FOLDER}\\photo_{quran_page_number + 1}.jpg'
+    page_1 = f'{QURAN_PAGES_FOLDER}/photo_{quran_page_number}.jpg'
+    page_2 = f'{QURAN_PAGES_FOLDER}/photo_{quran_page_number + 1}.jpg'
     
     # Send both pages together with the caption
     await bot.send_media_group(
@@ -65,18 +65,18 @@ async def send_quran_pages():
 # Async function to send Athkar based on the time of day
 async def send_athkar(time_of_day):
     if time_of_day == 'morning':
-        athkar_image = f'{ATHKAR_FOLDER}\\أذكار_الصباح.jpg'
+        athkar_image = f'{ATHKAR_FOLDER}/أذكار_الصباح.jpg'
     else:
-        athkar_image = f'{ATHKAR_FOLDER}\\أذكار_المساء.jpg'
+        athkar_image = f'{ATHKAR_FOLDER}/أذكار_المساء.jpg'
     
     await send_image(athkar_image)  # No caption for Athkar
 
 # Async function to send fasting reminders twice a week
 async def send_fasting_reminder(day):
     if day == 'sunday':
-        fasting_image = f'{FASTING_FOLDER}\\صيام_الإثنين.jpg'
+        fasting_image = f'{FASTING_FOLDER}/صيام_الإثنين.jpg'
     else:
-        fasting_image = f'{FASTING_FOLDER}\\صيام_الخميس.jpg'
+        fasting_image = f'{FASTING_FOLDER}/صيام_الخميس.jpg'
     
     await send_image(fasting_image)  # Fasting reminder, no caption needed
 
@@ -112,6 +112,15 @@ async def schedule_tasks():
     # Start the scheduler
     scheduler.start()
 
+# Keep-alive function to ping the bot
+async def keep_alive():
+    while True:
+        try:
+            requests.get("https://your-app-url-on-render")  # Replace with your Render app URL
+        except Exception as e:
+            print(f"Keep-alive error: {e}")
+        await asyncio.sleep(600)  # Ping every 10 minutes
+
 if __name__ == "__main__":
     print("Bot started at", datetime.now())
 
@@ -119,7 +128,7 @@ if __name__ == "__main__":
     loop = asyncio.get_event_loop()
 
     # Schedule all tasks
-    loop.run_until_complete(schedule_tasks())
+    loop.run_until_complete(asyncio.gather(schedule_tasks(), keep_alive()))
 
     # Run the asyncio loop
     loop.run_forever()
