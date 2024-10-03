@@ -5,6 +5,10 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime, timedelta
 import requests
 from pytz import timezone
+from flask import Flask
+
+# Set up Flask app
+app = Flask(__name__)
 
 # Set up bot and chat details
 TOKEN = os.getenv("TELEGRAM_TOKEN")  # Use the environment variable for the bot token
@@ -69,7 +73,7 @@ async def send_athkar(time_of_day):
     else:
         athkar_image = f'{ATHKAR_FOLDER}/أذكار_المساء.jpg'
     
-    await send_image(athkar_image)  # No caption for Athkar
+    await send_image(athkar_image)
 
 # Async function to send fasting reminders twice a week
 async def send_fasting_reminder(day):
@@ -78,7 +82,7 @@ async def send_fasting_reminder(day):
     else:
         fasting_image = f'{FASTING_FOLDER}/صيام_الخميس.jpg'
     
-    await send_image(fasting_image)  # Fasting reminder, no caption needed
+    await send_image(fasting_image)
 
 # Calculate the next prayer times
 async def schedule_prayer_times():
@@ -121,14 +125,18 @@ async def keep_alive():
             print(f"Keep-alive error: {e}")
         await asyncio.sleep(600)  # Ping every 10 minutes
 
+@app.route('/')
+def home():
+    return "Bot is running!"
+
 if __name__ == "__main__":
     print("Bot started at", datetime.now())
-
+    
     # Initialize the asyncio event loop
     loop = asyncio.get_event_loop()
-
+    
     # Schedule all tasks
     loop.run_until_complete(asyncio.gather(schedule_tasks(), keep_alive()))
-
+    
     # Run the asyncio loop
-    loop.run_forever()
+    app.run(host='0.0.0.0', port=int(os.getenv("PORT", 5000)))
