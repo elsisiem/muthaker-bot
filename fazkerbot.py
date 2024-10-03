@@ -116,7 +116,7 @@ async def schedule_tasks():
 async def keep_alive():
     while True:
         try:
-            requests.get("https://your-app-url-on-render")  # Replace with your Render app URL
+            requests.get("https://muthaker-bot.onrender.com")  # Replace with your Render app URL
         except Exception as e:
             print(f"Keep-alive error: {e}")
         await asyncio.sleep(600)  # Ping every 10 minutes
