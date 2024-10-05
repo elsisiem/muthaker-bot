@@ -1,11 +1,10 @@
 import os
-import asyncio
 import logging
 from datetime import datetime, timedelta
 import pytz
 import requests
-from telegram.ext import ApplicationBuilder, CommandHandler
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from telegram import Bot
+from apscheduler.schedulers.blocking import BlockingScheduler
 import sqlalchemy as sa
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
@@ -17,6 +16,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # Set up bot and chat details
 TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
+bot = Bot(token=TOKEN)
 
 # GitHub raw content URLs
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/elsisiem/muthaker-bot/master"
@@ -92,28 +92,19 @@ def get_prayer_times():
         logging.error(f"Error fetching prayer times: {str(e)}")
         return None
 
-def get_next_occurrence(time_str, base_time=None):
-    if base_time is None:
-        base_time = datetime.now(CAIRO_TZ)
-    time = datetime.strptime(time_str, '%H:%M').time()
-    next_occurrence = base_time.replace(hour=time.hour, minute=time.minute, second=0, microsecond=0)
-    if next_occurrence <= base_time:
-        next_occurrence += timedelta(days=1)
-    return next_occurrence
-
-async def send_image(context, image_url, caption=""):
+def send_image(image_url, caption=""):
     try:
-        await context.bot.send_photo(chat_id=CHAT_ID, photo=image_url, caption=caption)
+        bot.send_photo(chat_id=CHAT_ID, photo=image_url, caption=caption)
         logging.info(f"Sent image: {image_url}")
     except Exception as e:
         logging.error(f"Error sending image {image_url}: {str(e)}")
 
-async def send_quran_pages(context):
+def send_quran_pages():
     state = get_bot_state()
     page_1_url = f"{QURAN_PAGES_URL}/photo_{state.quran_page_number}.jpg"
     page_2_url = f"{QURAN_PAGES_URL}/photo_{state.quran_page_number + 1}.jpg"
     try:
-        await context.bot.send_media_group(
+        bot.send_media_group(
             chat_id=CHAT_ID,
             media=[
                 {"type": "photo", "media": page_1_url},
@@ -129,79 +120,56 @@ async def send_quran_pages(context):
     except Exception as e:
         logging.error(f"Error sending Quran pages: {str(e)}")
 
-async def send_athkar(context, time_of_day):
+def send_athkar(time_of_day):
     state = get_bot_state()
     athkar_image_url = f"{ATHKAR_URL}/أذكار_{'الصباح' if time_of_day == 'morning' else 'المساء'}.jpg"
     try:
-        message = await context.bot.send_photo(chat_id=CHAT_ID, photo=athkar_image_url)
+        send_image(athkar_image_url)
         logging.info(f"Sent {time_of_day} Athkar")
-        
-        # Delete previous Athkar message
-        if state.last_athkar_type != time_of_day:
-            job = context.job
-            if 'last_message_id' in job.data:
-                try:
-                    await context.bot.delete_message(chat_id=CHAT_ID, message_id=job.data['last_message_id'])
-                    logging.info(f"Deleted previous {state.last_athkar_type} Athkar message")
-                except Exception as e:
-                    logging.error(f"Error deleting previous Athkar message: {str(e)}")
-        
-        # Update job data and bot state
-        context.job.data['last_message_id'] = message.message_id
         update_bot_state(last_athkar_type=time_of_day)
     except Exception as e:
         logging.error(f"Error sending {time_of_day} Athkar: {str(e)}")
 
-def schedule_daily_tasks(context):
-    scheduler = context.job_queue
-    scheduler.run_repeating(reschedule_daily_tasks, interval=timedelta(days=1), first=get_next_occurrence('00:00'))
-
-async def reschedule_daily_tasks(context):
-    scheduler = context.job_queue
-    scheduler.clear()
+def schedule_daily_tasks():
+    scheduler = BlockingScheduler(timezone=CAIRO_TZ)
     
-    prayer_times = get_prayer_times()
-    if not prayer_times:
-        logging.error("Failed to fetch prayer times. Using default times.")
-        prayer_times = {'Fajr': '05:00', 'Asr': '15:00'}
+    def schedule_tasks():
+        prayer_times = get_prayer_times()
+        if not prayer_times:
+            logging.error("Failed to fetch prayer times. Using default times.")
+            prayer_times = {'Fajr': '05:00', 'Asr': '15:00'}
 
-    fajr_time = get_next_occurrence(prayer_times['Fajr'])
-    asr_time = get_next_occurrence(prayer_times['Asr'])
+        fajr_time = datetime.strptime(prayer_times['Fajr'], '%H:%M').time()
+        asr_time = datetime.strptime(prayer_times['Asr'], '%H:%M').time()
 
-    morning_athkar_time = fajr_time + timedelta(minutes=30)
-    night_athkar_time = asr_time + timedelta(minutes=30)
-    quran_time = night_athkar_time + timedelta(minutes=15)
+        morning_athkar_time = (datetime.combine(datetime.now(CAIRO_TZ).date(), fajr_time) + timedelta(minutes=30)).time()
+        night_athkar_time = (datetime.combine(datetime.now(CAIRO_TZ).date(), asr_time) + timedelta(minutes=30)).time()
+        quran_time = (datetime.combine(datetime.now(CAIRO_TZ).date(), night_athkar_time) + timedelta(minutes=15)).time()
 
-    scheduler.run_once(lambda ctx: send_athkar(ctx, 'morning'), morning_athkar_time)
-    scheduler.run_once(lambda ctx: send_athkar(ctx, 'night'), night_athkar_time)
-    scheduler.run_once(send_quran_pages, quran_time)
+        scheduler.add_job(send_athkar, 'cron', args=['morning'], hour=morning_athkar_time.hour, minute=morning_athkar_time.minute)
+        scheduler.add_job(send_athkar, 'cron', args=['night'], hour=night_athkar_time.hour, minute=night_athkar_time.minute)
+        scheduler.add_job(send_quran_pages, 'cron', hour=quran_time.hour, minute=quran_time.minute)
 
-    logging.info(f"Scheduled tasks for {datetime.now(CAIRO_TZ).date()}:")
-    logging.info(f"Morning Athkar: {morning_athkar_time.strftime('%H:%M')}")
-    logging.info(f"Night Athkar: {night_athkar_time.strftime('%H:%M')}")
-    logging.info(f"Quran pages: {quran_time.strftime('%H:%M')}")
+        logging.info(f"Scheduled tasks for {datetime.now(CAIRO_TZ).date()}:")
+        logging.info(f"Morning Athkar: {morning_athkar_time.strftime('%H:%M')}")
+        logging.info(f"Night Athkar: {night_athkar_time.strftime('%H:%M')}")
+        logging.info(f"Quran pages: {quran_time.strftime('%H:%M')}")
 
-async def start(update, context):
-    await update.message.reply_text("Bot is running. Use /schedule to manually trigger scheduling.")
+    scheduler.add_job(schedule_tasks, 'cron', hour=0, minute=0)  # Run daily at midnight
+    scheduler.add_job(schedule_tasks, 'date')  # Run once immediately on startup
 
-async def manual_schedule(update, context):
-    await reschedule_daily_tasks(context)
-    await update.message.reply_text("Daily tasks have been manually scheduled.")
+    try:
+        scheduler.start()
+    except (KeyboardInterrupt, SystemExit):
+        pass
 
 def main():
     if not initialize_database():
         logging.error("Failed to initialize database. Exiting.")
         return
 
-    application = ApplicationBuilder().token(TOKEN).build()
-    
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("schedule", manual_schedule))
-    
-    job_queue = application.job_queue
-    job_queue.run_once(schedule_daily_tasks, when=1)
-    
-    application.run_polling()
+    logging.info("Starting the bot...")
+    schedule_daily_tasks()
 
 if __name__ == '__main__':
     main()
