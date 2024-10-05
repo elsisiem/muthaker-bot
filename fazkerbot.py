@@ -24,6 +24,8 @@ logging.basicConfig(
     ]
 )
 
+VERSE_MESSAGES = deque(maxlen=8) 
+
 # Set up bot and chat details
 TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
@@ -50,7 +52,6 @@ params = {
     'method': 3  # Muslim World League
 }
 
-VERSE_MESSAGES = deque(maxlen=5)  # Stores the last 5 verse message IDs
 # Verses to send randomly
 VERSES = [
     "قولوا : سبحانَ اللهِ ، و الحمدُ للهِ ، ولَا إلهَ إلَّا اللهِ ، واللهُ أكبرُ ، فإِنَّهنَّ يأتينَ يومَ القيامةِ مُقَدِّمَاتٍ وَمُعَقِّبَاتٍ وَمُجَنِّبَاتٍ ، وَهُنَّ الْبَاقِيَاتُ الصَّالِحَاتُ.",
@@ -191,15 +192,23 @@ async def send_athkar(time_of_day):
     except Exception as e:
         logging.error(f"Unexpected error sending {time_of_day} Athkar: {str(e)}")
 
+
 async def send_random_verse():
+    if not VERSES:
+        logging.warning("No verses available in the database.")
+        return
+
     verse = random.choice(VERSES)
     try:
-        await bot.send_message(chat_id=CHAT_ID, text=f"«{verse}»")
-        logging.info(f"Successfully sent random verse: {verse}")
-    except telegram.error.TelegramError as e:
-        logging.error(f"Telegram error sending random verse: {str(e)}")
+        message = await bot.send_message(chat_id=CHAT_ID, text=f"«{verse}»")
+        VERSE_MESSAGES.append(message.message_id)
+        if len(VERSE_MESSAGES) == VERSE_MESSAGES.maxlen:
+            oldest_message_id = VERSE_MESSAGES.popleft()
+            await bot.delete_message(chat_id=CHAT_ID, message_id=oldest_message_id)
+        logging.info(f"Sent random verse: {verse[:20]}...")
     except Exception as e:
-        logging.error(f"Unexpected error sending random verse: {str(e)}")
+        logging.error(f"Error sending random verse: {str(e)}")
+
 
 async def send_prayer_notification(prayer_name):
     prayer_image_url = f"{MISC_URL}/حي_على_الصلاة.png"
