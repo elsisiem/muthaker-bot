@@ -245,5 +245,15 @@ async def main():
     except asyncio.CancelledError:
         logging.info("Bot operation cancelled.")
 
+async def test_bot():
+    logging.info("Running bot test...")
+    await send_athkar('morning')
+    await send_athkar('night')
+    await send_quran_pages()
+    logging.info("Bot test completed.")
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    if len(sys.argv) > 1 and sys.argv[1] == "test":
+        asyncio.run(test_bot())
+    else:
+        asyncio.run(main())
