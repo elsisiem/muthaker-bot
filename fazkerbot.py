@@ -1,4 +1,5 @@
 import os
+import sys
 import telegram
 import asyncio
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -45,14 +46,15 @@ params = {
 }
 
 def load_json_file(file_path, default_value):
+    if not os.path.exists(file_path):
+        logging.info(f"File {file_path} not found. Creating with default value.")
+        save_json_file(file_path, default_value)
+        return default_value
     try:
         with open(file_path, 'r') as f:
             data = json.load(f)
         logging.info(f"Successfully loaded data from {file_path}")
         return data
-    except FileNotFoundError:
-        logging.warning(f"File {file_path} not found. Using default value.")
-        return default_value
     except json.JSONDecodeError as e:
         logging.error(f"Error decoding JSON from {file_path}: {str(e)}")
         return default_value
