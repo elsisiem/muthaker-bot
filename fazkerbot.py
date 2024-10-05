@@ -101,22 +101,6 @@ def save_message_ids(message_ids):
 quran_page_number = load_quran_page_number()
 message_ids = load_message_ids()
 
-async def log_daily_schedule():
-    now = datetime.now(CAIRO_TZ)
-    logging.info(f"Current date: {now.strftime('%Y-%m-%d')}")
-    
-    timings = get_prayer_times()
-    if timings:
-        logging.info("Prayer times for today:")
-        for prayer, time in timings.items():
-            logging.info(f"{prayer}: {time}")
-    
-    fajr_time, asr_time, quran_send_time = schedule_prayer_times()
-    logging.info("Next scheduled messages:")
-    logging.info(f"Morning Athkar at {fajr_time} ({(fajr_time - now).total_seconds() / 60:.2f} minutes from now)")
-    logging.info(f"Night Athkar at {asr_time} ({(asr_time - now).total_seconds() / 60:.2f} minutes from now)")
-    logging.info(f"Quran pages at {quran_send_time} ({(quran_send_time - now).total_seconds() / 60:.2f} minutes from now)")
-
 def get_prayer_times():
     max_retries = 3
     retry_delay = 60  # 1 minute
@@ -294,14 +278,6 @@ async def reschedule_daily_tasks(scheduler):
         if quran_send_time > now:
             scheduler.add_job(send_quran_pages, 'date', run_date=quran_send_time)
         
-        # If all times have passed for today, schedule for tomorrow
-        if all(time <= now for time in [fajr_time, asr_time, quran_send_time]):
-            tomorrow = now + timedelta(days=1)
-            fajr_time, asr_time, quran_send_time = schedule_prayer_times()
-            scheduler.add_job(send_athkar, 'date', run_date=fajr_time, args=['morning'])
-            scheduler.add_job(send_athkar, 'date', run_date=asr_time, args=['night'])
-            scheduler.add_job(send_quran_pages, 'date', run_date=quran_send_time)
-
         # Schedule random verse every 10 minutes
         scheduler.add_job(send_random_verse, 'interval', minutes=10)
         
