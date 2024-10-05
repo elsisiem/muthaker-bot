@@ -2,7 +2,6 @@ import os
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
 import pytz
 import requests
 from telegram.ext import ApplicationBuilder, CommandHandler
@@ -10,6 +9,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import sqlalchemy as sa
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.exc import OperationalError
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -32,6 +32,9 @@ API_PARAMS = {'city': 'Cairo', 'country': 'Egypt', 'method': 3}
 
 # Database setup
 DATABASE_URL = os.environ.get('DATABASE_URL')
+if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
 engine = sa.create_engine(DATABASE_URL)
 Base = declarative_base()
 Session = sessionmaker(bind=engine)
@@ -42,25 +45,42 @@ class BotState(Base):
     quran_page_number = sa.Column(sa.Integer, default=1)
     last_athkar_type = sa.Column(sa.String, default='night')
 
-Base.metadata.create_all(engine)
+def initialize_database():
+    try:
+        Base.metadata.create_all(engine)
+        logging.info("Database initialized successfully")
+    except OperationalError as e:
+        logging.error(f"Failed to initialize database: {str(e)}")
+        return False
+    return True
 
 def get_bot_state():
-    with Session() as session:
-        state = session.query(BotState).first()
-        if not state:
-            state = BotState()
-            session.add(state)
-            session.commit()
-        return state
+    try:
+        with Session() as session:
+            state = session.query(BotState).first()
+            if not state:
+                state = BotState()
+                session.add(state)
+                session.commit()
+            return state
+    except OperationalError as e:
+        logging.error(f"Database error when getting bot state: {str(e)}")
+        return BotState(quran_page_number=1, last_athkar_type='night')
 
 def update_bot_state(quran_page_number=None, last_athkar_type=None):
-    with Session() as session:
-        state = session.query(BotState).first()
-        if quran_page_number is not None:
-            state.quran_page_number = quran_page_number
-        if last_athkar_type is not None:
-            state.last_athkar_type = last_athkar_type
-        session.commit()
+    try:
+        with Session() as session:
+            state = session.query(BotState).first()
+            if not state:
+                state = BotState()
+                session.add(state)
+            if quran_page_number is not None:
+                state.quran_page_number = quran_page_number
+            if last_athkar_type is not None:
+                state.last_athkar_type = last_athkar_type
+            session.commit()
+    except OperationalError as e:
+        logging.error(f"Database error when updating bot state: {str(e)}")
 
 def get_prayer_times():
     try:
@@ -169,6 +189,10 @@ async def manual_schedule(update, context):
     await update.message.reply_text("Daily tasks have been manually scheduled.")
 
 def main():
+    if not initialize_database():
+        logging.error("Failed to initialize database. Exiting.")
+        return
+
     application = ApplicationBuilder().token(TOKEN).build()
     
     application.add_handler(CommandHandler("start", start))
