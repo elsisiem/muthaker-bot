@@ -101,6 +101,22 @@ def save_message_ids(message_ids):
 quran_page_number = load_quran_page_number()
 message_ids = load_message_ids()
 
+async def log_daily_schedule():
+    now = datetime.now(CAIRO_TZ)
+    logging.info(f"Current date: {now.strftime('%Y-%m-%d')}")
+    
+    timings = get_prayer_times()
+    if timings:
+        logging.info("Prayer times for today:")
+        for prayer, time in timings.items():
+            logging.info(f"{prayer}: {time}")
+    
+    fajr_time, asr_time, quran_send_time = schedule_prayer_times()
+    logging.info("Next scheduled messages:")
+    logging.info(f"Morning Athkar at {fajr_time} ({(fajr_time - now).total_seconds() / 60:.2f} minutes from now)")
+    logging.info(f"Night Athkar at {asr_time} ({(asr_time - now).total_seconds() / 60:.2f} minutes from now)")
+    logging.info(f"Quran pages at {quran_send_time} ({(quran_send_time - now).total_seconds() / 60:.2f} minutes from now)")
+
 def get_prayer_times():
     max_retries = 3
     retry_delay = 60  # 1 minute
