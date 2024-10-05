@@ -7,8 +7,10 @@ from datetime import datetime, timedelta
 import requests
 import json
 import logging
+import signal
 from zoneinfo import ZoneInfo
 import random
+from collections import deque
 
 # Set up logging
 logging.basicConfig(
@@ -25,7 +27,7 @@ TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 bot = telegram.Bot(token=TOKEN)
 
-# GitHub raw content URLs
+# GitHub raw content URLs for your image folders
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/elsisiem/muthaker-bot/master"
 QURAN_PAGES_URL = f"{GITHUB_RAW_URL}/%D8%A7%D9%84%D9%85%D8%B5%D8%AD%D9%81"
 ATHKAR_URL = f"{GITHUB_RAW_URL}/%D8%A7%D9%84%D8%A3%D8%B0%D9%83%D8%A7%D8%B1"
@@ -34,9 +36,8 @@ MISC_URL = f"{GITHUB_RAW_URL}/%D9%85%D9%86%D9%88%D8%B9"
 # File paths for JSON files
 COUNTER_FILE = "quran_page_counter.json"
 MESSAGE_IDS_FILE = "message_ids.json"
-RANDOM_ATHKAR_FILE = "random_athkar_ids.json"
 
-# Cairo timezone
+# Cairo timezone using zoneinfo
 CAIRO_TZ = ZoneInfo("Africa/Cairo")
 
 # Prayer times API setup
@@ -47,19 +48,19 @@ params = {
     'method': 3  # Muslim World League
 }
 
-# Random athkar messages
-RANDOM_ATHKAR = [
-    "قولوا : سبحانَ اللهِ ، و الحمدُ للهِ ، ولَا إلهَ إلَّا اللهِ ، واللهُ أكبرُ...",
-    "يا عبدالله بن قيس، ألا أدلك على كنز من كنوز الجنة؟ لا حول ولا قوة إلا بالله...",
-    "من استغفر للمؤمنين والمؤمنات...",
-    "من دخل السوق، فقال: لا إله إلا الله...",
+VERSE_MESSAGES = deque(maxlen=5)  # Stores the last 5 verse message IDs
+# Verses to send randomly
+VERSES = [
+    "قولوا : سبحانَ اللهِ ، و الحمدُ للهِ ، ولَا إلهَ إلَّا اللهِ ، واللهُ أكبرُ ، فإِنَّهنَّ يأتينَ يومَ القيامةِ مُقَدِّمَاتٍ وَمُعَقِّبَاتٍ وَمُجَنِّبَاتٍ ، وَهُنَّ الْبَاقِيَاتُ الصَّالِحَاتُ.",
+    "يا عبدالله بن قيس، ألا أدلك على كنز من كنوز الجنة؟ لا حول ولا قوة إلا بالله",
+    "من استغفر للمؤمنين والمؤمنات، كتب الله له بكل مؤمن ومؤمنة حسنة",
+    "من دخل السوق، فقال: لا إله إلا الله، وحده لا شريك له، له الملك وله الحمد، يحيي ويميت، وهو حي لا يموت، بيده الخير، وهو على كل شيء قدير، كتب الله له ألف ألف حسنة، ومحا عنه ألف ألف سيئة، ورفع له ألف ألف درجة",
     "﴿ فَمَنْ يَعْمَلْ مِثْقَالَ ذَرَّةٍ خَيْرًا يَرَهُ * وَمَنْ يَعْمَلْ مِثْقَالَ ذَرَّةٍ شَرًّا يَرَهُ ﴾",
-    "﴿ فَمَنْ ثَقُلَتْ مَوَازِينُهُ فَأُولَئِكَ هُمُ الْمُفْلِحُونَ...",
-    "﴿ فَأَمَّا مَنْ ثَقُلَتْ مَوَازِينُهُ...",
-    "«من قال في يوم مائتي مرة..."
+    "﴿ فَمَنْ ثَقُلَتْ مَوَازِينُهُ فَأُولَئِكَ هُمُ الْمُفْلِحُونَ * وَمَنْ خَفَّتْ مَوَازِينُهُ فَأُولَئِكَ الَّذِينَ خَسِرُوا أَنْفُسَهُمْ فِي جَهَنَّمَ خَالِدُونَ ﴾",
+    "﴿ فَأَمَّا مَنْ ثَقُلَتْ مَوَازِينُهُ * فَهُوَ فِي عِيشَةٍ رَاضِيَةٍ * وَأَمَّا مَنْ خَفَّتْ مَوَازِينُهُ * فَأُمُّهُ هَاوِيَةٌ * وَمَا أَدْرَاكَ مَا هِيَهْ * نَارٌ حَامِيَةٌ ﴾",
+    "«من قال في يوم مائتي مرة [مائة إذا أصبح، ومائة إذا أمسى]: لا إله إلا الله وحده لا شريك له، له الملك وله الحمد، وهو على كل شيء قدير، لم يسبقه أحد كان قبله، ولا يدركه أحد بعده، إلا من عمل أفضل من عمله"
 ]
 
-# Load/Save JSON helper functions
 def load_json_file(file_path, default_value):
     if not os.path.exists(file_path):
         logging.info(f"File {file_path} not found. Creating with default value.")
@@ -82,28 +83,22 @@ def save_json_file(file_path, data):
     except Exception as e:
         logging.error(f"Failed to save data to {file_path}: {str(e)}")
 
-# Quran page number logic
 def load_quran_page_number():
-    return load_json_file(COUNTER_FILE, {'page_number': 200}).get('page_number', 200)
+    data = load_json_file(COUNTER_FILE, {'page_number': 200})
+    return data.get('page_number', 200)
 
 def save_quran_page_number(page_number):
     save_json_file(COUNTER_FILE, {'page_number': page_number})
 
-# Message ID logic
 def load_message_ids():
-    return load_json_file(MESSAGE_IDS_FILE, {"morning": None, "night": None})
+    return load_json_file(MESSAGE_IDS_FILE, {"morning": [], "night": []})
 
 def save_message_ids(message_ids):
     save_json_file(MESSAGE_IDS_FILE, message_ids)
 
-# Random Athkar management
-def load_random_athkar_ids():
-    return load_json_file(RANDOM_ATHKAR_FILE, [])
+quran_page_number = load_quran_page_number()
+message_ids = load_message_ids()
 
-def save_random_athkar_ids(ids):
-    save_json_file(RANDOM_ATHKAR_FILE, ids)
-
-# Fetch prayer times
 def get_prayer_times():
     max_retries = 3
     retry_delay = 60  # 1 minute
@@ -115,9 +110,8 @@ def get_prayer_times():
             response.raise_for_status()
             data = response.json()
             timings = data['data']['timings']
-            date = data['data']['date']['gregorian']['date']
-            logging.info(f"Fetched prayer times for {date}: {timings}")
-            return timings, date
+            logging.info(f"Fetched prayer times: {timings}")
+            return timings
         except requests.RequestException as e:
             logging.error(f"Error fetching prayer times (attempt {attempt + 1}/{max_retries}): {str(e)}")
             if attempt < max_retries - 1:
@@ -125,50 +119,261 @@ def get_prayer_times():
                 asyncio.sleep(retry_delay)
             else:
                 logging.error("Max retries reached. Using fallback times.")
-                return None, None
+                return None
 
-# Schedule test messages
-async def send_test_message():
-    message = random.choice(RANDOM_ATHKAR)
+def get_next_occurrence(time_str, base_time=None):
+    if base_time is None:
+        base_time = datetime.now(CAIRO_TZ)
+    time = datetime.strptime(time_str, '%H:%M').time()
+    next_occurrence = base_time.replace(hour=time.hour, minute=time.minute, second=0, microsecond=0)
+    if next_occurrence <= base_time:
+        next_occurrence += timedelta(days=1)
+    return next_occurrence
+
+async def send_image_from_url(image_url, caption=""):
     try:
-        await bot.send_message(chat_id=CHAT_ID, text=f"«{message}»")
-        logging.info("Test message sent.")
+        await bot.send_photo(chat_id=CHAT_ID, photo=image_url, caption=caption)
+        logging.info(f"Successfully sent image: {image_url}")
     except telegram.error.TelegramError as e:
-        logging.error(f"Error sending test message: {str(e)}")
+        logging.error(f"Telegram error sending image {image_url}: {str(e)}")
+    except Exception as e:
+        logging.error(f"Unexpected error sending image {image_url}: {str(e)}")
 
-# Schedule Salah notifications with image
+async def send_quran_pages():
+    global quran_page_number
+    page_1_url = f"{QURAN_PAGES_URL}/photo_{quran_page_number}.jpg"
+    page_2_url = f"{QURAN_PAGES_URL}/photo_{quran_page_number + 1}.jpg"
+    try:
+        await bot.send_media_group(
+            chat_id=CHAT_ID,
+            media=[
+                telegram.InputMediaPhoto(page_1_url),
+                telegram.InputMediaPhoto(page_2_url)
+            ],
+            caption=f'ورد اليوم - الصفحات {quran_page_number} و {quran_page_number + 1}'
+        )
+        logging.info(f"Successfully sent Quran pages {quran_page_number} and {quran_page_number + 1}")
+        # Increment and save page number
+        quran_page_number += 2
+        if quran_page_number > 604:
+            quran_page_number = 1
+        save_quran_page_number(quran_page_number)
+    except telegram.error.TelegramError as e:
+        logging.error(f"Telegram error sending Quran pages: {str(e)}")
+    except Exception as e:
+        logging.error(f"Unexpected error sending Quran pages: {str(e)}")
+
+async def send_athkar(time_of_day):
+    global message_ids
+    athkar_image_url = f"{ATHKAR_URL}/أذكار_{'الصباح' if time_of_day == 'morning' else 'المساء'}.jpg"
+    try:
+        message = await bot.send_photo(chat_id=CHAT_ID, photo=athkar_image_url)
+        logging.info(f"Successfully sent {time_of_day} Athkar")
+        
+        # Update message IDs
+        message_ids[time_of_day].append(message.message_id)
+        if len(message_ids[time_of_day]) > 30:
+            oldest_message_id = message_ids[time_of_day].pop(0)
+            try:
+                await bot.delete_message(chat_id=CHAT_ID, message_id=oldest_message_id)
+                logging.info(f"Deleted oldest {time_of_day} Athkar message")
+            except telegram.error.BadRequest as e:
+                if 'Message to delete not found' in str(e):
+                    logging.info(f"Oldest {time_of_day} Athkar message already deleted")
+                else:
+                    logging.error(f"Error deleting oldest {time_of_day} Athkar message: {str(e)}")
+        
+        save_message_ids(message_ids)
+    except telegram.error.TelegramError as e:
+        logging.error(f"Telegram error sending {time_of_day} Athkar: {str(e)}")
+    except Exception as e:
+        logging.error(f"Unexpected error sending {time_of_day} Athkar: {str(e)}")
+
+async def send_random_verse():
+    verse = random.choice(VERSES)
+    try:
+        await bot.send_message(chat_id=CHAT_ID, text=f"«{verse}»")
+        logging.info(f"Successfully sent random verse: {verse}")
+    except telegram.error.TelegramError as e:
+        logging.error(f"Telegram error sending random verse: {str(e)}")
+    except Exception as e:
+        logging.error(f"Unexpected error sending random verse: {str(e)}")
+
 async def send_prayer_notification(prayer_name):
+    prayer_image_url = f"{MISC_URL}/حي_على_الصلاة.png"
+    caption = f"صلاة {prayer_name}"
     try:
-        image_url = f"{MISC_URL}/حيعلىالصلاة.png"
-        await bot.send_photo(chat_id=CHAT_ID, photo=image_url, caption=f"صلاة {prayer_name}")
+        await send_image_from_url(prayer_image_url, caption)
         logging.info(f"Successfully sent prayer notification for {prayer_name}")
-    except telegram.error.TelegramError as e:
-        logging.error(f"Error sending prayer notification: {str(e)}")
+    except Exception as e:
+        logging.error(f"Error sending prayer notification for {prayer_name}: {str(e)}")
 
-# Testing: send random athkar every 10 minutes for debugging
-async def schedule_test_athkar(scheduler):
-    scheduler.add_job(send_test_message, 'interval', minutes=10)
-    logging.info("Test athkar scheduled every 10 minutes.")
-
-# Main function
-async def main():
-    timings, date = get_prayer_times()
-
-    # Schedule prayers and test messages
-    scheduler = AsyncIOScheduler()
-    scheduler.start()
-
+def schedule_prayer_times():
+    timings = get_prayer_times()
+    now = datetime.now(CAIRO_TZ)
+    prayer_schedule = {}
     if timings:
-        # Log next scheduled messages
-        for prayer, time in timings.items():
-            next_occurrence = get_next_occurrence(time)
-            logging.info(f"{prayer} scheduled at {time}, occurring at {next_occurrence}")
+        try:
+            prayer_names = {
+                'Fajr': 'الفجر',
+                'Dhuhr': 'الظهر',
+                'Asr': 'العصر',
+                'Maghrib': 'المغرب',
+                'Isha': 'العشاء'
+            }
+            for prayer, arabic_name in prayer_names.items():
+                prayer_time = get_next_occurrence(timings[prayer], now)
+                prayer_schedule[prayer] = (prayer_time, arabic_name)
+            
+            fajr_time = prayer_schedule['Fajr'][0] + timedelta(minutes=30)
+            asr_time = prayer_schedule['Asr'][0] + timedelta(minutes=30)
+            quran_send_time = asr_time + timedelta(minutes=15)
+            
+            logging.info(f"Prayer schedule for {now.date()}:")
+            for prayer, (time, _) in prayer_schedule.items():
+                logging.info(f"  {prayer}: {time.strftime('%H:%M')}")
+            logging.info(f"Scheduled Fajr Athkar: {fajr_time.strftime('%H:%M')}")
+            logging.info(f"Scheduled Asr Athkar: {asr_time.strftime('%H:%M')}")
+            logging.info(f"Scheduled Quran pages: {quran_send_time.strftime('%H:%M')}")
+            
+            return prayer_schedule, fajr_time, asr_time, quran_send_time
+        except ValueError as e:
+            logging.error(f"Error parsing prayer times: {str(e)}")
+    
+    # Fallback to default times if API fails
+    logging.warning("Using default prayer times")
+    default_times = {
+        'Fajr': ('05:00', 'الفجر'),
+        'Dhuhr': ('12:00', 'الظهر'),
+        'Asr': ('15:00', 'العصر'),
+        'Maghrib': ('18:00', 'المغرب'),
+        'Isha': ('19:30', 'العشاء')
+    }
+    prayer_schedule = {prayer: (get_next_occurrence(time), arabic_name) for prayer, (time, arabic_name) in default_times.items()}
+    fajr_time = get_next_occurrence("05:30")
+    asr_time = get_next_occurrence("15:30")
+    quran_send_time = get_next_occurrence("16:00")
+    return prayer_schedule, fajr_time, asr_time, quran_send_time
 
-        # Example of scheduling prayers with image notifications
-        scheduler.add_job(send_prayer_notification, 'date', run_date=get_next_occurrence(timings['Asr']), args=['العصر'])
+async def reschedule_daily_tasks(scheduler):
+    while True:
+        now = datetime.now(CAIRO_TZ)
+        prayer_schedule, fajr_time, asr_time, quran_send_time = schedule_prayer_times()
 
-        # Testing function for athkar every 10 minutes
-        await schedule_test_athkar(scheduler)
+        # Remove existing jobs before scheduling new ones
+        scheduler.remove_all_jobs()
 
-if __name__ == '__main__':
-    asyncio.run(main())
+        # Schedule prayer notifications
+        for prayer, (prayer_time, arabic_name) in prayer_schedule.items():
+            if prayer_time > now:
+                scheduler.add_job(send_prayer_notification, 'date', run_date=prayer_time, args=[arabic_name])
+
+        # Schedule Athkar and Quran pages
+        if fajr_time > now:
+            scheduler.add_job(send_athkar, 'date', run_date=fajr_time, args=['morning'])
+        if asr_time > now:
+            scheduler.add_job(send_athkar, 'date', run_date=asr_time, args=['night'])
+        if quran_send_time > now:
+            scheduler.add_job(send_quran_pages, 'date', run_date=quran_send_time)
+        
+        # If all times have passed for today, schedule for tomorrow
+        if all(time <= now for time in [fajr_time, asr_time, quran_send_time]):
+            tomorrow = now + timedelta(days=1)
+            fajr_time, asr_time, quran_send_time = schedule_prayer_times()
+            scheduler.add_job(send_athkar, 'date', run_date=fajr_time, args=['morning'])
+            scheduler.add_job(send_athkar, 'date', run_date=asr_time, args=['night'])
+            scheduler.add_job(send_quran_pages, 'date', run_date=quran_send_time)
+
+        # Schedule random verse every 10 minutes
+        scheduler.add_job(send_random_verse, 'interval', minutes=10)
+        
+        # Log the next scheduled times
+        logging.info(f"Next scheduled messages:")
+        for prayer, (time, arabic_name) in prayer_schedule.items():
+            logging.info(f"  Prayer notification ({arabic_name}): {time.strftime('%H:%M')}")
+        logging.info(f"  Morning Athkar: {fajr_time.strftime('%H:%M')}")
+        logging.info(f"  Night Athkar: {asr_time.strftime('%H:%M')}")
+        logging.info(f"  Quran pages: {quran_send_time.strftime('%H:%M')}")
+
+        # Wait until the next day to reschedule
+        next_schedule_time = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        await asyncio.sleep((next_schedule_time - now).total_seconds())
+
+def shutdown(signal, frame, scheduler):
+    logging.info("Shutting down the bot...")
+    scheduler.shutdown()
+    asyncio.get_event_loop().stop()
+
+async def main():
+    scheduler = AsyncIOScheduler(timezone=CAIRO_TZ)
+    
+    # Log daily schedule
+    await log_daily_schedule()
+    
+    # Schedule prayer notifications
+    await schedule_prayer_notifications(scheduler)
+    
+    # Schedule random verse every 5 minutes
+    scheduler.add_job(send_random_verse, 'interval', minutes=5)
+    
+
+    # Schedule initial tasks
+    await reschedule_daily_tasks(scheduler)
+    
+    # Start the scheduler
+    scheduler.start()
+    
+    # Set up signal handlers for graceful shutdown
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(sig, lambda s, f: shutdown(s, f, scheduler))
+    
+    try:
+        while True:
+            await asyncio.sleep(1)
+    except asyncio.CancelledError:
+        logging.info("Bot operation cancelled.")
+
+
+async def cyclic_test():
+    logging.info("Starting cyclic test...")
+    start_time = datetime.now()
+    end_time = start_time + timedelta(minutes=10)
+    cycle_count = 0
+
+    while datetime.now() < end_time:
+        cycle_count += 1
+        logging.info(f"Starting cycle {cycle_count}")
+        
+        await send_athkar('morning')
+        await asyncio.sleep(10)
+        
+        await send_athkar('night')
+        await asyncio.sleep(5)
+        
+        await send_quran_pages()
+        
+        logging.info(f"Completed cycle {cycle_count}")
+        
+        # Wait for the remainder of 30 seconds
+        elapsed = (datetime.now() - start_time).total_seconds() % 30
+        await asyncio.sleep(30 - elapsed)
+
+    logging.info(f"Cyclic test completed. Total cycles: {cycle_count}")
+
+async def test_bot():
+    logging.info("Running bot test...")
+    await send_athkar('morning')
+    await send_athkar('night')
+    await send_quran_pages()
+    logging.info("Bot test completed.")
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "test":
+            asyncio.run(test_bot())
+        elif sys.argv[1] == "cyclic_test":
+            asyncio.run(cyclic_test())
+        else:
+            print("Unknown test type. Use 'test' or 'cyclic_test'.")
+    else:
+        asyncio.run(main())
