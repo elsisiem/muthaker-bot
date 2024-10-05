@@ -301,9 +301,6 @@ def shutdown(signal, frame, scheduler):
 async def main():
     scheduler = AsyncIOScheduler(timezone=CAIRO_TZ)
     
-    # Log daily schedule
-    await log_daily_schedule()
-    
     # Schedule prayer notifications
     await schedule_prayer_notifications(scheduler)
     
