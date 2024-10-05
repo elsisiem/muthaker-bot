@@ -279,7 +279,7 @@ async def reschedule_daily_tasks(scheduler):
             scheduler.add_job(send_quran_pages, 'date', run_date=quran_send_time)
         
         # Schedule random verse every 10 minutes
-        scheduler.add_job(send_random_verse, 'interval', minutes=10)
+        scheduler.add_job(send_random_verse, 'interval', minutes=1)
         
         # Log the next scheduled times
         logging.info(f"Next scheduled messages:")
@@ -301,13 +301,9 @@ def shutdown(signal, frame, scheduler):
 async def main():
     scheduler = AsyncIOScheduler(timezone=CAIRO_TZ)
     
-    # Schedule prayer notifications
-    await schedule_prayer_notifications(scheduler)
-    
     # Schedule random verse every 5 minutes
-    scheduler.add_job(send_random_verse, 'interval', minutes=5)
+    scheduler.add_job(send_random_verse, 'interval', minutes=1)
     
-
     # Schedule initial tasks
     await reschedule_daily_tasks(scheduler)
     
