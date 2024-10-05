@@ -11,6 +11,8 @@ import signal
 from zoneinfo import ZoneInfo
 import random
 from collections import deque
+import pytz
+
 
 # Set up logging
 logging.basicConfig(
@@ -38,7 +40,7 @@ COUNTER_FILE = "quran_page_counter.json"
 MESSAGE_IDS_FILE = "message_ids.json"
 
 # Cairo timezone using zoneinfo
-CAIRO_TZ = ZoneInfo("Africa/Cairo")
+CAIRO_TZ = pytz.timezone('Africa/Cairo')
 
 # Prayer times API setup
 API_URL = "https://api.aladhan.com/v1/timingsByCity"
