@@ -68,8 +68,8 @@ def save_json_file(file_path, data):
         logging.error(f"Failed to save data to {file_path}: {str(e)}")
 
 def load_quran_page_number():
-    data = load_json_file(COUNTER_FILE, {'page_number': 1})
-    return data.get('page_number', 1)
+    data = load_json_file(COUNTER_FILE, {'page_number': 200})
+    return data.get('page_number', 200)
 
 def save_quran_page_number(page_number):
     save_json_file(COUNTER_FILE, {'page_number': page_number})
@@ -134,7 +134,7 @@ async def send_quran_pages():
                 telegram.InputMediaPhoto(page_1_url),
                 telegram.InputMediaPhoto(page_2_url)
             ],
-            caption='ورد اليوم'
+            caption=f'ورد اليوم - الصفحات {quran_page_number} و {quran_page_number + 1}'
         )
         logging.info(f"Successfully sent Quran pages {quran_page_number} and {quran_page_number + 1}")
         # Increment and save page number
@@ -146,6 +146,7 @@ async def send_quran_pages():
         logging.error(f"Telegram error sending Quran pages: {str(e)}")
     except Exception as e:
         logging.error(f"Unexpected error sending Quran pages: {str(e)}")
+
 
 async def send_athkar(time_of_day):
     global message_ids
@@ -247,6 +248,32 @@ async def main():
     except asyncio.CancelledError:
         logging.info("Bot operation cancelled.")
 
+async def cyclic_test():
+    logging.info("Starting cyclic test...")
+    start_time = datetime.now()
+    end_time = start_time + timedelta(minutes=10)
+    cycle_count = 0
+
+    while datetime.now() < end_time:
+        cycle_count += 1
+        logging.info(f"Starting cycle {cycle_count}")
+        
+        await send_athkar('morning')
+        await asyncio.sleep(10)
+        
+        await send_athkar('night')
+        await asyncio.sleep(5)
+        
+        await send_quran_pages()
+        
+        logging.info(f"Completed cycle {cycle_count}")
+        
+        # Wait for the remainder of 30 seconds
+        elapsed = (datetime.now() - start_time).total_seconds() % 30
+        await asyncio.sleep(30 - elapsed)
+
+    logging.info(f"Cyclic test completed. Total cycles: {cycle_count}")
+
 async def test_bot():
     logging.info("Running bot test...")
     await send_athkar('morning')
@@ -255,7 +282,12 @@ async def test_bot():
     logging.info("Bot test completed.")
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "test":
-        asyncio.run(test_bot())
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "test":
+            asyncio.run(test_bot())
+        elif sys.argv[1] == "cyclic_test":
+            asyncio.run(cyclic_test())
+        else:
+            print("Unknown test type. Use 'test' or 'cyclic_test'.")
     else:
         asyncio.run(main())
