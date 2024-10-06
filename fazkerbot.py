@@ -376,5 +376,5 @@ async def test_bot():
     logging.info("Bot test completed.")
 
 if __name__ == "__main__":
-    asyncio.run(cyclic_test())
+    #asyncio.run(cyclic_test())
     asyncio.run(main())
