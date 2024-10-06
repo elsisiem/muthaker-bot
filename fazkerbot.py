@@ -194,9 +194,9 @@ async def send_athkar(time_of_day):
         logging.error(f"Telegram error sending {time_of_day} Athkar: {str(e)}")
     except Exception as e:
         logging.error(f"Unexpected error sending {time_of_day} Athkar: {str(e)}")
-
+    
 async def send_random_verse():
-    """Send a random verse to the chat."""
+    logging.info("Attempting to send a random verse.")
     if not VERSES:
         logging.warning("No verses available in the database.")
         return
