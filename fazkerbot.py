@@ -2,7 +2,6 @@ import os
 import sys
 import asyncio
 import logging
-import json
 import random
 import signal
 from datetime import datetime, timedelta
@@ -13,6 +12,8 @@ import pytz
 import telegram
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import requests
+import psycopg2
+from psycopg2 import sql
 
 # Set up logging
 logging.basicConfig(
@@ -27,12 +28,11 @@ logging.basicConfig(
 # Constants
 TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
+DATABASE_URL = os.environ.get('DATABASE_URL')
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/elsisiem/muthaker-bot/master"
 QURAN_PAGES_URL = f"{GITHUB_RAW_URL}/%D8%A7%D9%84%D9%85%D8%B5%D8%AD%D9%81"
 ATHKAR_URL = f"{GITHUB_RAW_URL}/%D8%A7%D9%84%D8%A3%D8%B0%D9%83%D8%A7%D8%B1"
 MISC_URL = f"{GITHUB_RAW_URL}/%D9%85%D9%86%D9%88%D8%B9"
-COUNTER_FILE = "quran_page_counter.json"
-MESSAGE_IDS_FILE = "message_ids.json"
 CAIRO_TZ = pytz.timezone('Africa/Cairo')
 API_URL = "https://api.aladhan.com/v1/timingsByCity"
 API_PARAMS = {
@@ -59,46 +59,68 @@ VERSES = [
     "«من قال في يوم مائتي مرة [مائة إذا أصبح، ومائة إذا أمسى]: لا إله إلا الله وحده لا شريك له، له الملك وله الحمد، وهو على كل شيء قدير، لم يسبقه أحد كان قبله، ولا يدركه أحد بعده، إلا من عمل أفضل من عمله"
 ]
 
-def load_json_file(file_path, default_value):
-    """Load JSON file or create it with default value if not exists."""
-    if not os.path.exists(file_path):
-        logging.info(f"File {file_path} not found. Creating with default value.")
-        save_json_file(file_path, default_value)
-        return default_value
-    try:
-        with open(file_path, 'r') as f:
-            data = json.load(f)
-        logging.info(f"Successfully loaded data from {file_path}")
-        return data
-    except json.JSONDecodeError as e:
-        logging.error(f"Error decoding JSON from {file_path}: {str(e)}")
+def get_db_connection():
+    """Create a database connection."""
+    conn = psycopg2.connect(DATABASE_URL, sslmode='require')
+    return conn
+
+def initialize_db():
+    """Initialize the database with necessary tables."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS bot_data (
+            key TEXT PRIMARY KEY,
+            value JSONB
+        )
+    """)
+    conn.commit()
+    cur.close()
+    conn.close()
+
+def load_data(key, default_value):
+    """Load data from the database."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT value FROM bot_data WHERE key = %s", (key,))
+    result = cur.fetchone()
+    cur.close()
+    conn.close()
+    
+    if result:
+        return result[0]
+    else:
+        save_data(key, default_value)
         return default_value
 
-def save_json_file(file_path, data):
-    """Save data to JSON file."""
-    try:
-        with open(file_path, 'w') as f:
-            json.dump(data, f)
-        logging.info(f"Successfully saved data to {file_path}")
-    except Exception as e:
-        logging.error(f"Failed to save data to {file_path}: {str(e)}")
+def save_data(key, value):
+    """Save data to the database."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        sql.SQL("INSERT INTO bot_data (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = %s"),
+        (key, psycopg2.Json(value), psycopg2.Json(value))
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
 
 def load_quran_page_number():
     """Load the current Quran page number."""
-    data = load_json_file(COUNTER_FILE, {'page_number': 206})
+    data = load_data('quran_page', {'page_number': 206})
     return data.get('page_number', 206)
 
 def save_quran_page_number(page_number):
     """Save the current Quran page number."""
-    save_json_file(COUNTER_FILE, {'page_number': page_number})
+    save_data('quran_page', {'page_number': page_number})
 
 def load_message_ids():
     """Load message IDs for deletion tracking."""
-    return load_json_file(MESSAGE_IDS_FILE, {"morning": [], "night": []})
+    return load_data('message_ids', {"morning": [], "night": []})
 
 def save_message_ids(message_ids):
     """Save message IDs for deletion tracking."""
-    save_json_file(MESSAGE_IDS_FILE, message_ids)
+    save_data('message_ids', message_ids)
 
 def get_prayer_times():
     """Fetch prayer times from the API."""
@@ -221,7 +243,7 @@ async def send_prayer_notification(prayer_name):
         logging.info(f"Successfully sent prayer notification for {prayer_name}")
     except Exception as e:
         logging.error(f"Error sending prayer notification for {prayer_name}: {str(e)}")
-
+        
 def schedule_prayer_times():
     """Schedule prayer times and other daily tasks."""
     timings = get_prayer_times()
