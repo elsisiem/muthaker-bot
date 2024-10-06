@@ -200,7 +200,6 @@ async def send_random_verse():
     if not VERSES:
         logging.warning("No verses available in the database.")
         return
-
     verse = random.choice(VERSES)
     try:
         message = await bot.send_message(chat_id=CHAT_ID, text=f"«{verse}»")
@@ -343,5 +342,46 @@ async def main():
         save_quran_page_number(quran_page_number)
         save_message_ids(message_ids)
 
+async def cyclic_test():
+    logging.info("Starting cyclic test...")
+    start_time = datetime.now()
+    end_time = start_time + timedelta(minutes=3)
+    cycle_count = 0
+
+    while datetime.now() < end_time:
+        cycle_count += 1
+        logging.info(f"Starting cycle {cycle_count}")
+        
+        await send_athkar('morning')
+        await asyncio.sleep(10)
+        
+        await send_athkar('night')
+        await asyncio.sleep(5)
+        
+        await send_quran_pages()
+        
+        logging.info(f"Completed cycle {cycle_count}")
+        
+        # Wait for the remainder of 30 seconds
+        elapsed = (datetime.now() - start_time).total_seconds() % 30
+        await asyncio.sleep(30 - elapsed)
+
+    logging.info(f"Cyclic test completed. Total cycles: {cycle_count}")
+
+async def test_bot():
+    logging.info("Running bot test...")
+    await send_athkar('morning')
+    await send_athkar('night')
+    await send_quran_pages()
+    logging.info("Bot test completed.")
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "test":
+            asyncio.run(test_bot())
+        elif sys.argv[1] == "cyclic_test":
+            asyncio.run(cyclic_test())
+        else:
+            print("Unknown test type. Use 'test' or 'cyclic_test'.")
+    else:
+        asyncio.run(main())
