@@ -376,12 +376,5 @@ async def test_bot():
     logging.info("Bot test completed.")
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        if sys.argv[1] == "test":
-            asyncio.run(test_bot())
-        elif sys.argv[1] == "cyclic_test":
-            asyncio.run(cyclic_test())
-        else:
-            print("Unknown test type. Use 'test' or 'cyclic_test'.")
-    else:
-        asyncio.run(main())
+    asyncio.run(cyclic_test())
+    asyncio.run(main())
