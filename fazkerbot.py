@@ -1,210 +1,162 @@
 import os
-import asyncio
 import logging
-from datetime import datetime, timedelta
-import random
-
+import requests
 import pytz
-from telegram import Bot, InputMediaPhoto
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-import aiohttp
+from datetime import datetime, timedelta
 import psycopg2
-from psycopg2.extras import DictCursor
+from telegram import Bot
+from apscheduler.schedulers.background import BackgroundScheduler
 
-
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler()]
-)
-
-# Constants
+# CONSTANTS
 TOKEN = os.environ['TELEGRAM_BOT_TOKEN']
 CHAT_ID = os.environ['TELEGRAM_CHAT_ID']
 DATABASE_URL = os.environ['DATABASE_URL']
+CAIRO_TZ = pytz.timezone('Africa/Cairo')
+API_URL = "https://api.aladhan.com/v1/timingsByCity"
+API_PARAMS = {'city': 'Cairo', 'country': 'Egypt', 'method': 3}
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/elsisiem/muthaker-bot/master"
 QURAN_PAGES_URL = f"{GITHUB_RAW_URL}/%D8%A7%D9%84%D9%85%D8%B5%D8%AD%D9%81"
 ATHKAR_URL = f"{GITHUB_RAW_URL}/%D8%A7%D9%84%D8%A3%D8%B0%D9%83%D8%A7%D8%B1"
 MISC_URL = f"{GITHUB_RAW_URL}/%D9%85%D9%86%D9%88%D8%B9"
-CAIRO_TZ = pytz.timezone('Africa/Cairo')
-API_URL = "https://api.aladhan.com/v1/timingsByCity"
-API_PARAMS = {
-    'city': 'Cairo',
-    'country': 'Egypt',
-    'method': 3  # Muslim World League
-}
 
-# Verses to send randomly
-VERSES = [
-    "قولوا : سبحانَ اللهِ ، و الحمدُ للهِ ، ولَا إلهَ إلَّا اللهِ ، واللهُ أكبرُ ، فإِنَّهنَّ يأتينَ يومَ القيامةِ مُقَدِّمَاتٍ وَمُعَقِّبَاتٍ وَمُجَنِّبَاتٍ ، وَهُنَّ الْبَاقِيَاتُ الصَّالِحَاتُ.",
-    "يا عبدالله بن قيس، ألا أدلك على كنز من كنوز الجنة؟ لا حول ولا قوة إلا بالله",
-    "من استغفر للمؤمنين والمؤمنات، كتب الله له بكل مؤمن ومؤمنة حسنة",
-    "من دخل السوق، فقال: لا إله إلا الله، وحده لا شريك له، له الملك وله الحمد، يحيي ويميت، وهو حي لا يموت، بيده الخير، وهو على كل شيء قدير، كتب الله له ألف ألف حسنة، ومحا عنه ألف ألف سيئة، ورفع له ألف ألف درجة",
-    "﴿ فَمَنْ يَعْمَلْ مِثْقَالَ ذَرَّةٍ خَيْرًا يَرَهُ * وَمَنْ يَعْمَلْ مِثْقَالَ ذَرَّةٍ شَرًّا يَرَهُ ﴾",
-    "﴿ فَمَنْ ثَقُلَتْ مَوَازِينُهُ فَأُولَئِكَ هُمُ الْمُفْلِحُونَ * وَمَنْ خَفَّتْ مَوَازِينُهُ فَأُولَئِكَ الَّذِينَ خَسِرُوا أَنْفُسَهُمْ فِي جَهَنَّمَ خَالِدُونَ ﴾",
-    "﴿ فَأَمَّا مَنْ ثَقُلَتْ مَوَازِينُهُ * فَهُوَ فِي عِيشَةٍ رَاضِيَةٍ * وَأَمَّا مَنْ خَفَّتْ مَوَازِينُهُ * فَأُمُّهُ هَاوِيَةٌ * وَمَا أَدْرَاكَ مَا هِيَهْ * نَارٌ حَامِيَةٌ ﴾",
-    "«من قال في يوم مائتي مرة [مائة إذا أصبح، ومائة إذا أمسى]: لا إله إلا الله وحده لا شريك له، له الملك وله الحمد، وهو على كل شيء قدير، لم يسبقه أحد كان قبله، ولا يدركه أحد بعده، إلا من عمل أفضل من عمله"
-]
+# Initialize bot and logger
+bot = Bot(token=TOKEN)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+logger = logging.getLogger()
 
-class DatabaseManager:
-    def __init__(self, database_url):
-        self.database_url = database_url
+# Database connection
+conn = psycopg2.connect(DATABASE_URL)
+cur = conn.cursor()
 
-    def get_connection(self):
-        return psycopg2.connect(self.database_url, sslmode='require')
+# Scheduler for dynamic scheduling
+scheduler = BackgroundScheduler()
 
-    def execute_query(self, query, params=None):
-        with self.get_connection() as conn:
-            with conn.cursor(cursor_factory=DictCursor) as cur:
-                cur.execute(query, params)
-                conn.commit()
-                if cur.description:
-                    return cur.fetchall()
+def fetch_prayer_times():
+    """Fetch prayer times for the current day from Aladhan API."""
+    response = requests.get(API_URL, params=API_PARAMS)
+    data = response.json()
+    timings = data['data']['timings']
+    return {
+        'Fajr': timings['Fajr'],
+        'Asr': timings['Asr'],
+        'Maghrib': timings['Maghrib'],
+        'Isha': timings['Isha']
+    }
 
-    def init_db(self):
-        self.execute_query("""
-            CREATE TABLE IF NOT EXISTS bot_state (
-                key TEXT PRIMARY KEY,
-                value TEXT
-            )
-        """)
+def get_scheduled_times(prayer_times):
+    """Calculate times for athkar and Quran based on fetched prayer times."""
+    fajr_time = datetime.strptime(prayer_times['Fajr'], "%H:%M").replace(tzinfo=CAIRO_TZ)
+    asr_time = datetime.strptime(prayer_times['Asr'], "%H:%M").replace(tzinfo=CAIRO_TZ)
+    
+    return {
+        'morning_athkar': fajr_time + timedelta(minutes=35),
+        'night_athkar': asr_time + timedelta(minutes=35),
+        'quran_pages': asr_time + timedelta(minutes=45),
+        'prayer_notifications': {
+            'Fajr': fajr_time,
+            'Asr': asr_time,
+            'Dhuhr': datetime.strptime(prayer_times['Dhuhr'], "%H:%M").replace(tzinfo=CAIRO_TZ),
+            'Maghrib': datetime.strptime(prayer_times['Maghrib'], "%H:%M").replace(tzinfo=CAIRO_TZ),
+            'Isha': datetime.strptime(prayer_times['Isha'], "%H:%M").replace(tzinfo=CAIRO_TZ)
+        }
+    }
 
-    def get_quran_page_number(self):
-        result = self.execute_query("SELECT value FROM bot_state WHERE key = 'quran_page_number'")
-        return int(result[0]['value']) if result else 206
+def send_morning_athkar():
+    """Send morning athkar and delete the previous night's athkar."""
+    photo_url = f"{ATHKAR_URL}/أذاكر_الصباح.png"
+    message = bot.send_photo(chat_id=CHAT_ID, photo=photo_url, caption="#أذكار_الصباح")
+    log_message_and_delete_previous("morning_athkar", message.message_id, "night_athkar")
 
-    def save_quran_page_number(self, page_number):
-        self.execute_query(
-            "INSERT INTO bot_state (key, value) VALUES ('quran_page_number', %s) "
-            "ON CONFLICT (key) DO UPDATE SET value = %s",
-            (str(page_number), str(page_number))
-        )
+def send_night_athkar():
+    """Send night athkar and delete the previous morning's athkar."""
+    photo_url = f"{ATHKAR_URL}/أذكار_المساء.png"
+    message = bot.send_photo(chat_id=CHAT_ID, photo=photo_url, caption="#أذكار_المساء")
+    log_message_and_delete_previous("night_athkar", message.message_id, "morning_athkar")
 
-    def get_message_ids(self):
-        result = self.execute_query("SELECT value FROM bot_state WHERE key = 'message_ids'")
-        return eval(result[0]['value']) if result else {"morning": [], "night": []}
-
-    def save_message_ids(self, message_ids):
-        self.execute_query(
-            "INSERT INTO bot_state (key, value) VALUES ('message_ids', %s) "
-            "ON CONFLICT (key) DO UPDATE SET value = %s",
-            (str(message_ids), str(message_ids))
-        )
-
-db_manager = DatabaseManager(DATABASE_URL)
-db_manager.init_db()
-
-async def get_prayer_times():
-    max_retries = 3
-    retry_delay = 60  # 1 minute
-    for attempt in range(max_retries):
-        try:
-            logging.info(f"Attempting to fetch prayer times (Attempt {attempt + 1})")
-            async with aiohttp.ClientSession() as session:
-                async with session.get(API_URL, params=API_PARAMS) as response:
-                    response.raise_for_status()
-                    data = await response.json()
-                    timings = data['data']['timings']
-                    logging.info(f"Fetched prayer times: {timings}")
-                    return timings
-        except aiohttp.ClientError as e:
-            logging.error(f"Error fetching prayer times (attempt {attempt + 1}/{max_retries}): {str(e)}")
-            if attempt < max_retries - 1:
-                await asyncio.sleep(retry_delay)
-            else:
-                logging.error("Max retries reached. Using fallback times.")
-                return None
-
-def get_next_occurrence(time_str, base_time=None):
-    if base_time is None:
-        base_time = datetime.now(CAIRO_TZ)
-    time = datetime.strptime(time_str, '%H:%M').time()
-    next_occurrence = base_time.replace(hour=time.hour, minute=time.minute, second=0, microsecond=0)
-    if next_occurrence <= base_time:
-        next_occurrence += timedelta(days=1)
-    return next_occurrence
-
-async def send_image_from_url(context, image_url, caption=""):
-    try:
-        await context.bot.send_photo(chat_id=CHAT_ID, photo=image_url, caption=caption)
-        logging.info(f"Successfully sent image: {image_url}")
-    except Exception as e:
-        logging.error(f"Error sending image {image_url}: {str(e)}")
-
-async def send_quran_pages(context):
-    quran_page_number = db_manager.get_quran_page_number()
+def send_quran_pages():
+    """Send two Quran pages with the caption #ورد_اليوم."""
+    cur.execute("SELECT page_number FROM quran_progress WHERE id = 1")
+    quran_page_number = cur.fetchone()[0]
+    
     page_1_url = f"{QURAN_PAGES_URL}/photo_{quran_page_number}.jpg"
     page_2_url = f"{QURAN_PAGES_URL}/photo_{quran_page_number + 1}.jpg"
-    try:
-        await context.bot.send_media_group(
-            chat_id=CHAT_ID,
-            media=[
-                InputMediaPhoto(page_1_url),
-                InputMediaPhoto(page_2_url)
-            ],
-            caption=f'ورد اليوم - الصفحات {quran_page_number} و {quran_page_number + 1}'
-        )
-        logging.info(f"Successfully sent Quran pages {quran_page_number} and {quran_page_number + 1}")
-        quran_page_number += 2
-        if quran_page_number > 604:
-            quran_page_number = 1
-        db_manager.save_quran_page_number(quran_page_number)
-    except Exception as e:
-        logging.error(f"Error sending Quran pages: {str(e)}")
-
-async def send_athkar(context, time_of_day):
-    message_ids = db_manager.get_message_ids()
-    athkar_image_url = f"{ATHKAR_URL}/أذكار_{'الصباح' if time_of_day == 'morning' else 'المساء'}.jpg"
-    try:
-        message = await context.bot.send_photo(chat_id=CHAT_ID, photo=athkar_image_url)
-        logging.info(f"Successfully sent {time_of_day} Athkar")
-        message_ids[time_of_day].append(message.message_id)
-        db_manager.save_message_ids(message_ids)
-    except Exception as e:
-        logging.error(f"Error sending {time_of_day} Athkar: {str(e)}")
-
-async def send_random_verse(context):
-    verse = random.choice(VERSES)
-    try:
-        await context.bot.send_message(chat_id=CHAT_ID, text=verse)
-        logging.info(f"Successfully sent random verse: {verse}")
-    except Exception as e:
-        logging.error(f"Error sending random verse: {str(e)}")
-
-async def scheduled_job(context):
-    await send_random_verse(context)
-    await send_quran_pages(context)
-    await send_athkar(context, 'morning')
-    await send_athkar(context, 'night')
-
-async def startup_message(context, prayer_times):
-    prayer_times_text = '\n'.join(f"{key}: {value}" for key, value in prayer_times.items())
-    start_message = f"Bot started!\nScheduled message timings:\n{prayer_times_text}"
-    await context.bot.send_message(chat_id=CHAT_ID, text=start_message)
-    logging.info(f"Startup message sent: {start_message}")
-
-async def main():
-    bot = Bot(token=TOKEN)
-    scheduler = AsyncIOScheduler()
     
-    prayer_times = await get_prayer_times()
-    await startup_message(bot, prayer_times)
+    bot.send_media_group(
+        chat_id=CHAT_ID,
+        media=[
+            {"type": "photo", "media": page_1_url},
+            {"type": "photo", "media": page_2_url}
+        ],
+        caption="#ورد_اليوم"
+    )
+    
+    # Update next Quran page in the database
+    next_page = quran_page_number + 2 if quran_page_number < 603 else 1
+    cur.execute("UPDATE quran_progress SET page_number = %s WHERE id = 1", (next_page,))
+    conn.commit()
 
-    scheduler.add_job(lambda: scheduled_job(bot), 'interval', minutes=2)
+def send_prayer_notification(prayer_name):
+    """Send a notification image at prayer times."""
+    prayer_image_url = f"{MISC_URL}/حي_على_الصلاة.png"
+    caption = f"صلاة {prayer_name}"
+    bot.send_photo(chat_id=CHAT_ID, photo=prayer_image_url, caption=caption)
 
-    morning_time = get_next_occurrence(prayer_times['Fajr']).time()
-    night_time = get_next_occurrence(prayer_times['Maghrib']).time()
+def log_message_and_delete_previous(current_athkar, new_message_id, previous_athkar):
+    """Log message ID and delete the previous athkar message."""
+    cur.execute(f"SELECT message_id FROM athkar_messages WHERE name = '{previous_athkar}'")
+    previous_message_id = cur.fetchone()[0]
+    if previous_message_id:
+        try:
+            bot.delete_message(chat_id=CHAT_ID, message_id=previous_message_id)
+        except:
+            logger.warning(f"Failed to delete {previous_athkar} message.")
+    
+    cur.execute(f"UPDATE athkar_messages SET message_id = %s WHERE name = %s", (new_message_id, current_athkar))
+    conn.commit()
 
-    logging.info(f"Next morning Athkar scheduled at: {morning_time}")
-    logging.info(f"Next night Athkar scheduled at: {night_time}")
+def schedule_tasks():
+    """Fetch new prayer times daily and schedule tasks."""
+    prayer_times = fetch_prayer_times()
+    scheduled_times = get_scheduled_times(prayer_times)
+    
+    # Log schedule and send initial message
+    log_day_schedule(prayer_times, scheduled_times)
 
-    await send_athkar(bot, 'morning')
-    await send_athkar(bot, 'night')
+    # Schedule tasks
+    scheduler.add_job(send_morning_athkar, 'date', run_date=scheduled_times['morning_athkar'])
+    scheduler.add_job(send_night_athkar, 'date', run_date=scheduled_times['night_athkar'])
+    scheduler.add_job(send_quran_pages, 'date', run_date=scheduled_times['quran_pages'])
+
+    # Schedule prayer notifications
+    for prayer_name, prayer_time in scheduled_times['prayer_notifications'].items():
+        scheduler.add_job(send_prayer_notification, 'date', run_date=prayer_time, args=[prayer_name])
 
     scheduler.start()
 
-    await asyncio.Event().wait()  # Keep the program running
+def log_day_schedule(prayer_times, scheduled_times):
+    """Log the schedule for the day and send an overview to the Telegram channel."""
+    message = f"""
+*Prayer Times Overview:*
+- Fajr: {prayer_times['Fajr']}
+- Dhuhr: {prayer_times['Dhuhr']}
+- Asr: {prayer_times['Asr']}
+- Maghrib: {prayer_times['Maghrib']}
+- Isha: {prayer_times['Isha']}
 
-if __name__ == "__main__":
-    asyncio.run(main())
+*Today's Schedule:*
+- Morning Athkar: {scheduled_times['morning_athkar'].strftime('%H:%M')}
+- Night Athkar: {scheduled_times['night_athkar'].strftime('%H:%M')}
+- Quran Pages: {scheduled_times['quran_pages'].strftime('%H:%M')}
+
+*Prayer Notifications:*
+- Fajr: {scheduled_times['prayer_notifications']['Fajr'].strftime('%H:%M')}
+- Dhuhr: {scheduled_times['prayer_notifications']['Dhuhr'].strftime('%H:%M')}
+- Asr: {scheduled_times['prayer_notifications']['Asr'].strftime('%H:%M')}
+- Maghrib: {scheduled_times['prayer_notifications']['Maghrib'].strftime('%H:%M')}
+- Isha: {scheduled_times['prayer_notifications']['Isha'].strftime('%H:%M')}
+"""
+    bot.send_message(chat_id=CHAT_ID, text=message, parse_mode='Markdown')
+
+# Main execution
+if __name__ == '__main__':
+    schedule_tasks()
