@@ -5,11 +5,13 @@ from datetime import datetime, timedelta
 import random
 
 import pytz
-from telegram.ext import Application
+from telegram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-import requests
+import aiohttp
 import psycopg2
 from psycopg2.extras import DictCursor
+
+
 
 # Set up logging
 logging.basicConfig(
@@ -100,14 +102,14 @@ async def get_prayer_times():
     for attempt in range(max_retries):
         try:
             logging.info(f"Attempting to fetch prayer times (Attempt {attempt + 1})")
-            async with requests.Session() as session:
+            async with aiohttp.ClientSession() as session:
                 async with session.get(API_URL, params=API_PARAMS) as response:
                     response.raise_for_status()
                     data = await response.json()
                     timings = data['data']['timings']
                     logging.info(f"Fetched prayer times: {timings}")
                     return timings
-        except requests.RequestException as e:
+        except aiohttp.ClientError as e:
             logging.error(f"Error fetching prayer times (attempt {attempt + 1}/{max_retries}): {str(e)}")
             if attempt < max_retries - 1:
                 await asyncio.sleep(retry_delay)
@@ -193,9 +195,8 @@ async def send_prayer_notification(context, prayer_name):
     except Exception as e:
         logging.error(f"Error sending prayer notification for {prayer_name}: {str(e)}")
 
-async def schedule_daily_tasks(context):
-    scheduler = context.job_queue
-    scheduler.clear()
+async def schedule_daily_tasks(bot, scheduler):
+    scheduler.remove_all_jobs()
 
     timings = await get_prayer_times()
     now = datetime.now(CAIRO_TZ)
@@ -210,7 +211,7 @@ async def schedule_daily_tasks(context):
         }
         for prayer, arabic_name in prayer_names.items():
             prayer_time = get_next_occurrence(timings[prayer], now)
-            scheduler.run_once(send_prayer_notification, prayer_time, context=arabic_name)
+            scheduler.add_job(send_prayer_notification, 'date', run_date=prayer_time, args=[bot, arabic_name])
         
         morning_athkar_time = get_next_occurrence(timings['Fajr'], now) + timedelta(minutes=30)
         night_athkar_time = get_next_occurrence(timings['Asr'], now) + timedelta(minutes=30)
@@ -221,36 +222,41 @@ async def schedule_daily_tasks(context):
         night_athkar_time = get_next_occurrence("15:30", now)
         quran_send_time = get_next_occurrence("16:00", now)
 
-    scheduler.run_once(send_athkar, morning_athkar_time, context='morning')
-    scheduler.run_once(send_athkar, night_athkar_time, context='night')
-    scheduler.run_once(send_quran_pages, quran_send_time)
+    scheduler.add_job(send_athkar, 'date', run_date=morning_athkar_time, args=[bot, 'morning'])
+    scheduler.add_job(send_athkar, 'date', run_date=night_athkar_time, args=[bot, 'night'])
+    scheduler.add_job(send_quran_pages, 'date', run_date=quran_send_time, args=[bot])
     
     # Schedule random verse every 2 minutes
-    scheduler.run_repeating(send_random_verse, interval=120)
+    scheduler.add_job(send_random_verse, 'interval', minutes=2, args=[bot])
     
     # Schedule next day's tasks
     next_day = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-    scheduler.run_once(schedule_daily_tasks, next_day)
+    scheduler.add_job(schedule_daily_tasks, 'date', run_date=next_day, args=[bot, scheduler])
 
     logging.info("Daily tasks scheduled successfully")
+
 
 async def error_handler(update, context):
     """Log Errors caused by Updates."""
     logging.error(f"Exception while handling an update: {context.error}")
 
-def main():
+async def main():
     """Start the bot."""
-    # Create the Application and pass it your bot's token.
-    application = Application.builder().token(TOKEN).build()
+    bot = Bot(token=TOKEN)
+    scheduler = AsyncIOScheduler(timezone=CAIRO_TZ)
+    scheduler.start()
 
-    # Set up the error handler
-    application.add_error_handler(error_handler)
+    # Schedule initial daily tasks
+    await schedule_daily_tasks(bot, scheduler)
 
-    # Schedule daily tasks
-    application.job_queue.run_once(schedule_daily_tasks, when=1)
-
-    # Start the Bot
-    application.run_polling()
+    try:
+        # Run the bot indefinitely
+        while True:
+            await asyncio.sleep(3600)  # Sleep for an hour (or any other interval)
+    except (KeyboardInterrupt, SystemExit):
+        # Shutdown gracefully
+        scheduler.shutdown()
+        logging.info("Bot stopped gracefully")
 
 if __name__ == '__main__':
-    main()
+    asyncio.run(main())
