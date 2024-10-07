@@ -1,7 +1,7 @@
 import os
 import datetime
 import pytz
-import urllib.request
+import requests
 import telegram
 import psycopg2
 
@@ -20,9 +20,9 @@ MISC_URL = "https://raw.githubusercontent.com/elsisiem/muthaker-bot/master/%D9%8
 
 # Function definitions
 def get_prayer_times():
-    response = urllib.request.urlopen(API_URL, data=urllib.parse.urlencode(API_PARAMS).encode())
-    data = response.read().decode()
-    prayer_times = json.loads(data)['data']['timings']
+    response = requests.get(API_URL, params=API_PARAMS)
+    response.raise_for_status()  # Raise an exception for error responses
+    prayer_times = response.json()['data']['timings']
     return prayer_times
 
 def format_prayer_time(prayer_time, prayer_name):
