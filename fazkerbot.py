@@ -53,9 +53,7 @@ def get_scheduled_times(prayer_times):
         'night_athkar': asr_time + timedelta(minutes=35),
         'quran_pages': asr_time + timedelta(minutes=45),
         'prayer_notifications': {
-            'Fajr': fajr_time,
             'Asr': asr_time,
-            'Dhuhr': datetime.strptime(prayer_times['Dhuhr'], "%H:%M").replace(tzinfo=CAIRO_TZ),
             'Maghrib': datetime.strptime(prayer_times['Maghrib'], "%H:%M").replace(tzinfo=CAIRO_TZ),
             'Isha': datetime.strptime(prayer_times['Isha'], "%H:%M").replace(tzinfo=CAIRO_TZ)
         }
@@ -138,7 +136,6 @@ def log_day_schedule(prayer_times, scheduled_times):
     message = f"""
 *Prayer Times Overview:*
 - Fajr: {prayer_times['Fajr']}
-- Dhuhr: {prayer_times['Dhuhr']}
 - Asr: {prayer_times['Asr']}
 - Maghrib: {prayer_times['Maghrib']}
 - Isha: {prayer_times['Isha']}
@@ -149,8 +146,6 @@ def log_day_schedule(prayer_times, scheduled_times):
 - Quran Pages: {scheduled_times['quran_pages'].strftime('%H:%M')}
 
 *Prayer Notifications:*
-- Fajr: {scheduled_times['prayer_notifications']['Fajr'].strftime('%H:%M')}
-- Dhuhr: {scheduled_times['prayer_notifications']['Dhuhr'].strftime('%H:%M')}
 - Asr: {scheduled_times['prayer_notifications']['Asr'].strftime('%H:%M')}
 - Maghrib: {scheduled_times['prayer_notifications']['Maghrib'].strftime('%H:%M')}
 - Isha: {scheduled_times['prayer_notifications']['Isha'].strftime('%H:%M')}
