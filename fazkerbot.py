@@ -11,6 +11,7 @@ import aiohttp
 import psycopg2
 from psycopg2.extras import DictCursor
 
+
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
@@ -24,7 +25,7 @@ CHAT_ID = os.environ['TELEGRAM_CHAT_ID']
 DATABASE_URL = os.environ['DATABASE_URL']
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/elsisiem/muthaker-bot/master"
 QURAN_PAGES_URL = f"{GITHUB_RAW_URL}/%D8%A7%D9%84%D9%85%D8%B5%D8%AD%D9%81"
-ATHKAR_URL = f"{GITHUB_RAW_URL}/%D8%A7%D9%84%D8%A3%D8%B2%D9%83%D8%A7%D8%B1"
+ATHKAR_URL = f"{GITHUB_RAW_URL}/%D8%A7%D9%84%D8%A3%D8%B0%D9%83%D8%A7%D8%B1"
 MISC_URL = f"{GITHUB_RAW_URL}/%D9%85%D9%86%D9%88%D8%B9"
 CAIRO_TZ = pytz.timezone('Africa/Cairo')
 API_URL = "https://api.aladhan.com/v1/timingsByCity"
@@ -117,7 +118,7 @@ async def get_prayer_times():
 
 def get_next_occurrence(time_str, base_time=None):
     if base_time is None:
-        base_time = datetime.now(CAIRO_TZ) + timedelta(hours=1)  # Fix time issue
+        base_time = datetime.now(CAIRO_TZ)
     time = datetime.strptime(time_str, '%H:%M').time()
     next_occurrence = base_time.replace(hour=time.hour, minute=time.minute, second=0, microsecond=0)
     if next_occurrence <= base_time:
@@ -157,9 +158,9 @@ async def send_athkar(context, time_of_day):
     athkar_image_url = f"{ATHKAR_URL}/أذكار_{'الصباح' if time_of_day == 'morning' else 'المساء'}.jpg"
     try:
         message = await context.bot.send_photo(chat_id=CHAT_ID, photo=athkar_image_url)
+        logging.info(f"Successfully sent {time_of_day} Athkar")
         message_ids[time_of_day].append(message.message_id)
         db_manager.save_message_ids(message_ids)
-        logging.info(f"Successfully sent {time_of_day} Athkar")
     except Exception as e:
         logging.error(f"Error sending {time_of_day} Athkar: {str(e)}")
 
@@ -171,49 +172,39 @@ async def send_random_verse(context):
     except Exception as e:
         logging.error(f"Error sending random verse: {str(e)}")
 
-async def bot_startup(context):
-    timings = await get_prayer_times()
-    if timings:
-        logging.info(f"Today's Prayer Times: {timings}")
-        await send_athkar(context, 'morning')
-        await send_quran_pages(context)
-        await send_athkar(context, 'night')
-        
-        # Log timings
-        today_schedule = (
-            f"Scheduled timings:\n"
-            f"Fajr: {timings['Fajr']}\n"
-            f"Dhuhr: {timings['Dhuhr']}\n"
-            f"Asr: {timings['Asr']}\n"
-            f"Maghrib: {timings['Maghrib']}\n"
-            f"Isha: {timings['Isha']}\n"
-        )
-        await context.bot.send_message(chat_id=CHAT_ID, text=today_schedule)
-        logging.info("Sent startup message with today's prayer timings.")
+async def scheduled_job(context):
+    await send_random_verse(context)
+    await send_quran_pages(context)
+    await send_athkar(context, 'morning')
+    await send_athkar(context, 'night')
 
-async def scheduled_tasks(context):
-    timings = await get_prayer_times()
-    if timings:
-        await send_athkar(context, 'morning')
-        await send_quran_pages(context)
-        await send_random_verse(context)
-        await send_athkar(context, 'night')
+async def startup_message(context, prayer_times):
+    prayer_times_text = '\n'.join(f"{key}: {value}" for key, value in prayer_times.items())
+    start_message = f"Bot started!\nScheduled message timings:\n{prayer_times_text}"
+    await context.bot.send_message(chat_id=CHAT_ID, text=start_message)
+    logging.info(f"Startup message sent: {start_message}")
 
 async def main():
-    # Set up the bot
-    bot = Bot(TOKEN)
-    context = await bot.get_chat(CHAT_ID)
-    
-    # Notify bot startup
-    await bot_startup(context)
-
-    # Scheduler
+    bot = Bot(token=TOKEN)
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(scheduled_tasks, 'cron', hour='*', minute='*/1', args=[context])  # Runs every minute
+    
+    prayer_times = await get_prayer_times()
+    await startup_message(bot, prayer_times)
+
+    scheduler.add_job(lambda: scheduled_job(bot), 'interval', minutes=2)
+
+    morning_time = get_next_occurrence(prayer_times['Fajr']).time()
+    night_time = get_next_occurrence(prayer_times['Maghrib']).time()
+
+    logging.info(f"Next morning Athkar scheduled at: {morning_time}")
+    logging.info(f"Next night Athkar scheduled at: {night_time}")
+
+    await send_athkar(bot, 'morning')
+    await send_athkar(bot, 'night')
+
     scheduler.start()
 
-    # Keep the bot running
-    await asyncio.Event().wait()
+    await asyncio.Event().wait()  # Keep the program running
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(main())
