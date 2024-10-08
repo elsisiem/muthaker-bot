@@ -263,7 +263,7 @@ async def test_telegram_connection():
 async def heartbeat():
     while True:
         logger.info("Heartbeat: Bot is still running")
-        await asyncio.sleep(3600)  # Every hour
+        await asyncio.sleep(60)  # Every minute
 
 async def main():
     await test_telegram_connection()
