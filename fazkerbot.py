@@ -9,6 +9,7 @@ from telegram import Bot
 import psycopg2
 from psycopg2.extras import DictCursor
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.date import DateTrigger
 
 # Constants
 TOKEN = os.environ['TELEGRAM_BOT_TOKEN']
@@ -29,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 # Initialize bot and scheduler
 bot = Bot(TOKEN)
-scheduler = AsyncIOScheduler()
+scheduler = AsyncIOScheduler(timezone=CAIRO_TZ)
 
 # Database setup
 def get_db_connection():
@@ -148,22 +149,22 @@ async def schedule_tasks():
 
     for prayer, time_str in prayer_times.items():
         if prayer in ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha']:
-            prayer_time = datetime.strptime(time_str, "%H:%M").replace(year=now.year, month=now.month, day=now.day, tzinfo=CAIRO_TZ)
+            prayer_time = CAIRO_TZ.localize(datetime.strptime(f"{now.date()} {time_str}", "%Y-%m-%d %H:%M"))
             
             if prayer == 'Fajr':
                 athkar_time = prayer_time + timedelta(minutes=35)
-                scheduler.add_job(send_athkar, 'date', run_date=athkar_time, args=["morning"])
+                scheduler.add_job(send_athkar, trigger=DateTrigger(run_date=athkar_time, timezone=CAIRO_TZ), args=["morning"])
                 schedule_info.append(f"Morning Athkar: {athkar_time.strftime('%H:%M')}")
             
             elif prayer == 'Asr':
                 athkar_time = prayer_time + timedelta(minutes=35)
                 quran_time = prayer_time + timedelta(minutes=45)
-                scheduler.add_job(send_athkar, 'date', run_date=athkar_time, args=["night"])
-                scheduler.add_job(send_quran_pages, 'date', run_date=quran_time)
+                scheduler.add_job(send_athkar, trigger=DateTrigger(run_date=athkar_time, timezone=CAIRO_TZ), args=["night"])
+                scheduler.add_job(send_quran_pages, trigger=DateTrigger(run_date=quran_time, timezone=CAIRO_TZ))
                 schedule_info.append(f"Night Athkar: {athkar_time.strftime('%H:%M')}")
                 schedule_info.append(f"Quran Pages: {quran_time.strftime('%H:%M')}")
             
-            scheduler.add_job(send_prayer_notification, 'date', run_date=prayer_time, args=[prayer])
+            scheduler.add_job(send_prayer_notification, trigger=DateTrigger(run_date=prayer_time, timezone=CAIRO_TZ), args=[prayer])
             schedule_info.append(f"{prayer} Prayer: {prayer_time.strftime('%H:%M')}")
 
     schedule_message = "Today's Schedule:\n" + "\n".join(schedule_info)
@@ -173,8 +174,8 @@ async def schedule_tasks():
 
 async def main():
     while True:
-        now = datetime.now(CAIRO_TZ)
-        next_day = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        now = CAIRO_TZ.localize(datetime.now())
+        next_day = CAIRO_TZ.localize(now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1))
         
         await schedule_tasks()
         
