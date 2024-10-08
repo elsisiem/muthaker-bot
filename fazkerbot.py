@@ -174,8 +174,9 @@ async def schedule_tasks():
 
 async def main():
     while True:
-        now = CAIRO_TZ.localize(datetime.now())
-        next_day = CAIRO_TZ.localize(now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1))
+        now = datetime.now(CAIRO_TZ)
+        next_day = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        next_day = CAIRO_TZ.localize(next_day.replace(tzinfo=None))
         
         await schedule_tasks()
         
