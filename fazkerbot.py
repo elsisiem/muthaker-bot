@@ -6,7 +6,8 @@ from datetime import datetime, timedelta
 import asyncio
 import aiohttp
 from telegram import Bot
-import sqlite3
+import psycopg2
+from psycopg2.extras import DictCursor
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # Constants
@@ -31,13 +32,19 @@ bot = Bot(TOKEN)
 scheduler = AsyncIOScheduler()
 
 # Database setup
-conn = sqlite3.connect(DATABASE_URL)
-cursor = conn.cursor()
-cursor.execute('''CREATE TABLE IF NOT EXISTS messages
-                  (id INTEGER PRIMARY KEY, message_id INTEGER, message_type TEXT)''')
-cursor.execute('''CREATE TABLE IF NOT EXISTS quran_progress
-                  (id INTEGER PRIMARY KEY, last_page INTEGER)''')
-conn.commit()
+def get_db_connection():
+    return psycopg2.connect(DATABASE_URL, sslmode='require')
+
+def setup_database():
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute('''CREATE TABLE IF NOT EXISTS messages
+                          (id SERIAL PRIMARY KEY, message_id INTEGER, message_type TEXT)''')
+            cur.execute('''CREATE TABLE IF NOT EXISTS quran_progress
+                          (id SERIAL PRIMARY KEY, last_page INTEGER)''')
+            conn.commit()
+
+setup_database()
 
 async def fetch_prayer_times():
     async with aiohttp.ClientSession() as session:
@@ -46,19 +53,22 @@ async def fetch_prayer_times():
             return data['data']['timings']
 
 def get_next_quran_pages():
-    cursor.execute('SELECT last_page FROM quran_progress WHERE id = 1')
-    result = cursor.fetchone()
-    if result:
-        last_page = result[0]
-    else:
-        last_page = 219  # Start from page 220
+    with get_db_connection() as conn:
+        with conn.cursor(cursor_factory=DictCursor) as cur:
+            cur.execute('SELECT last_page FROM quran_progress WHERE id = 1')
+            result = cur.fetchone()
+            if result:
+                last_page = result['last_page']
+            else:
+                last_page = 219  # Start from page 220
+                cur.execute('INSERT INTO quran_progress (id, last_page) VALUES (1, 219)')
 
-    next_page = last_page + 2
-    if next_page > 604:
-        next_page = 1
+            next_page = last_page + 2
+            if next_page > 604:
+                next_page = 1
 
-    cursor.execute('INSERT OR REPLACE INTO quran_progress (id, last_page) VALUES (1, ?)', (next_page,))
-    conn.commit()
+            cur.execute('UPDATE quran_progress SET last_page = %s WHERE id = 1', (next_page,))
+            conn.commit()
 
     return next_page, next_page + 1
 
@@ -86,19 +96,20 @@ async def send_athkar(athkar_type):
     
     message_id = await send_photo(CHAT_ID, image_url, caption)
     
-    cursor.execute('INSERT INTO messages (message_id, message_type) VALUES (?, ?)', (message_id, athkar_type))
-    conn.commit()
-
-    if athkar_type == "morning":
-        cursor.execute('SELECT message_id FROM messages WHERE message_type = "night"')
-    else:
-        cursor.execute('SELECT message_id FROM messages WHERE message_type = "morning"')
-    
-    old_message = cursor.fetchone()
-    if old_message:
-        await delete_message(CHAT_ID, old_message[0])
-        cursor.execute('DELETE FROM messages WHERE message_id = ?', (old_message[0],))
-        conn.commit()
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute('INSERT INTO messages (message_id, message_type) VALUES (%s, %s)', (message_id, athkar_type))
+            
+            if athkar_type == "morning":
+                cur.execute('SELECT message_id FROM messages WHERE message_type = %s', ('night',))
+            else:
+                cur.execute('SELECT message_id FROM messages WHERE message_type = %s', ('morning',))
+            
+            old_message = cur.fetchone()
+            if old_message:
+                await delete_message(CHAT_ID, old_message[0])
+                cur.execute('DELETE FROM messages WHERE message_id = %s', (old_message[0],))
+            conn.commit()
 
 async def send_quran_pages():
     page1, page2 = get_next_quran_pages()
@@ -112,9 +123,11 @@ async def send_quran_pages():
     
     message_ids = await send_media_group(CHAT_ID, media)
     
-    for message_id in message_ids:
-        cursor.execute('INSERT INTO messages (message_id, message_type) VALUES (?, ?)', (message_id, "quran"))
-    conn.commit()
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            for message_id in message_ids:
+                cur.execute('INSERT INTO messages (message_id, message_type) VALUES (%s, %s)', (message_id, "quran"))
+            conn.commit()
 
 async def send_prayer_notification(prayer_name):
     prayer_image_url = f"{MISC_URL}/حي_على_الصلاة.png"
@@ -122,8 +135,10 @@ async def send_prayer_notification(prayer_name):
     
     message_id = await send_photo(CHAT_ID, prayer_image_url, caption)
     
-    cursor.execute('INSERT INTO messages (message_id, message_type) VALUES (?, ?)', (message_id, "prayer"))
-    conn.commit()
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute('INSERT INTO messages (message_id, message_type) VALUES (%s, %s)', (message_id, "prayer"))
+            conn.commit()
 
 async def schedule_tasks():
     prayer_times = await fetch_prayer_times()
