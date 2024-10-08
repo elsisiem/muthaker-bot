@@ -171,16 +171,19 @@ async def schedule_tasks():
     await send_message(CHAT_ID, schedule_message)
 
     logger.info(f"Tasks scheduled for {now.date()}")
-
+    
 async def main():
+    last_scheduled_date = None
     while True:
         now = datetime.now(CAIRO_TZ)
-        next_day = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
-        next_day = CAIRO_TZ.localize(next_day.replace(tzinfo=None))
-        
-        await schedule_tasks()
-        
-        wait_seconds = (next_day - now).total_seconds()
+        current_date = now.date()
+
+        if last_scheduled_date != current_date:
+            await schedule_tasks()
+            last_scheduled_date = current_date
+
+        next_check = now + timedelta(minutes=5)  # Check every 5 minutes
+        wait_seconds = (next_check - now).total_seconds()
         await asyncio.sleep(wait_seconds)
 
 if __name__ == "__main__":
