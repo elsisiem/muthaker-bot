@@ -131,7 +131,7 @@ async def delete_message(chat_id, message_id):
 async def send_athkar(athkar_type):
     logger.info(f"Sending {athkar_type} Athkar")
     caption = "#أذكار_الصباح" if athkar_type == "morning" else "#أذكار_المساء"
-    image_url = f"{ATHKAR_URL}/{'أذاكر_الصباح' if athkar_type == 'morning' else 'أذكار_المساء'}.png"
+    image_url = f"{ATHKAR_URL}/{'أذاكر_الصباح' if athkar_type == 'morning' else 'أذكار_المساء'}.jpg"
     
     message_id = await send_photo(CHAT_ID, image_url, caption)
     
@@ -265,9 +265,55 @@ async def heartbeat():
         logger.info("Heartbeat: Bot is still running")
         await asyncio.sleep(60)  # Every minute
 
+async def test_all_functions():
+    logger.info("Starting test of all functions")
+    test_prayers = {
+        'Fajr': '05:00',
+        'Dhuhr': '12:00',
+        'Asr': '15:00',
+        'Maghrib': '18:00',
+        'Isha': '20:00'
+    }
+    
+    # Mock fetch_prayer_times function
+    async def mock_fetch_prayer_times():
+        return test_prayers
+
+    # Store the original function
+    original_fetch_prayer_times = globals()['fetch_prayer_times']
+    # Replace with mock function
+    globals()['fetch_prayer_times'] = mock_fetch_prayer_times
+
+    try:
+        # Schedule tasks
+        await schedule_tasks()
+
+        # Wait for a short time to allow scheduled jobs to run
+        await asyncio.sleep(5)
+
+        # Manually trigger each function
+        await send_athkar("morning")
+        await asyncio.sleep(5)
+        await send_athkar("night")
+        await asyncio.sleep(5)
+        await send_quran_pages()
+        await asyncio.sleep(5)
+        for prayer in test_prayers.keys():
+            await send_prayer_notification(prayer)
+            await asyncio.sleep(5)
+
+    finally:
+        # Restore the original function
+        globals()['fetch_prayer_times'] = original_fetch_prayer_times
+
+    logger.info("Test of all functions completed")
+
 async def main():
     await test_telegram_connection()
     asyncio.create_task(heartbeat())
+
+    # Run the test case once at startup
+    await test_all_functions()
 
     last_scheduled_date = None
     while True:
@@ -282,10 +328,8 @@ async def main():
             else:
                 logger.debug(f"No new scheduling needed. Current date: {current_date}, Last scheduled: {last_scheduled_date}")
 
-            next_check = now + timedelta(minutes=5)
-            wait_seconds = (next_check - now).total_seconds()
-            logger.debug(f"Waiting for {wait_seconds} seconds until next check")
-            await asyncio.sleep(wait_seconds)
+            # Use asyncio.sleep() to allow other tasks to run
+            await asyncio.sleep(300)  # Check every 5 minutes
         except Exception as e:
             logger.error(f"Error in main loop: {e}", exc_info=True)
             await asyncio.sleep(60)  # Wait a minute before retrying
@@ -294,9 +338,9 @@ if __name__ == "__main__":
     try:
         scheduler.start()
         logger.info("Scheduler started")
-        scheduler.add_job(lambda: logger.info("Test job running"), 'interval', minutes=1)
         asyncio.run(main())
     except Exception as e:
         logger.critical(f"Critical error in main execution: {e}", exc_info=True)
     finally:
+        scheduler.shutdown()
         connection_pool.closeall()
