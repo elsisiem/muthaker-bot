@@ -72,37 +72,35 @@ async def fetch_prayer_times():
         return None
 
 def get_next_quran_pages():
+    logger.info("Entering get_next_quran_pages function")
     conn = get_db_connection()
     try:
         with conn.cursor(cursor_factory=DictCursor) as cur:
             cur.execute('SELECT last_page FROM quran_progress WHERE id = 1')
             result = cur.fetchone()
+            logger.debug(f"Database query result: {result}")
             if result:
                 last_page = result['last_page']
             else:
-                last_page = 219  # Start from page 1
+                last_page = 0  # Start from page 1
                 cur.execute('INSERT INTO quran_progress (id, last_page) VALUES (1, 0)')
-
+                logger.info("Inserted initial quran_progress record")
             next_page = last_page + 1
             if next_page > 604:
                 next_page = 1
-
             cur.execute('UPDATE quran_progress SET last_page = %s WHERE id = 1', (next_page,))
             conn.commit()
             
-            logger.info(f"Next Quran pages: {next_page} and {next_page + 1}")
+            logger.info(f"Next Quran pages: {next_page} and {next_page + 1 if next_page < 604 else 1}")
             return next_page, next_page + 1 if next_page < 604 else 1
     except Exception as e:
-        logger.error(f"Error getting next Quran pages: {e}", exc_info=True)
+        logger.error(f"Error getting next Quran pages: {e}")
+        logger.error(traceback.format_exc())
         conn.rollback()
         return None, None
     finally:
         release_db_connection(conn)
-
-    return next_page, next_page + 1
-
-
-
+        logger.info("Exiting get_next_quran_pages function")
 
 async def send_message(chat_id, text, parse_mode='HTML'):
     try:
@@ -166,53 +164,61 @@ async def send_athkar(athkar_type):
         logger.error("Failed to send Athkar message")
 
 async def send_quran_pages():
-    logger.info("Sending Quran pages")
+    logger.info("Entering send_quran_pages function")
     page1, page2 = get_next_quran_pages()
     if page1 is None or page2 is None:
         logger.error("Failed to get next Quran pages")
         return
-
     page_1_url = f"{QURAN_PAGES_URL}/photo_{page1}.jpg"
     page_2_url = f"{QURAN_PAGES_URL}/photo_{page2}.jpg"
     
-    logger.debug(f"Quran page URLs: {page_1_url}, {page_2_url}")
-
+    logger.info(f"Quran page URLs: {page_1_url}, {page_2_url}")
+    
     # Verify that the images exist
     async with aiohttp.ClientSession() as session:
         for url in [page_1_url, page_2_url]:
             try:
                 async with session.head(url) as response:
+                    logger.info(f"HEAD request for {url}: status {response.status}")
                     if response.status != 200:
                         logger.error(f"Image not found: {url}")
                         return
             except Exception as e:
                 logger.error(f"Error checking image URL {url}: {e}")
+                logger.error(traceback.format_exc())
                 return
-
+    
     media = [
         {"type": "photo", "media": page_1_url},
         {"type": "photo", "media": page_2_url, "caption": "#ورد_اليوم"}
     ]
     
     try:
+        logger.info("Attempting to send media group")
         message_ids = await send_media_group(CHAT_ID, media)
         
         if message_ids:
+            logger.info(f"Successfully sent media group. Message IDs: {message_ids}")
             conn = get_db_connection()
             try:
                 with conn.cursor() as cur:
                     for message_id in message_ids:
                         cur.execute('INSERT INTO messages (message_id, message_type) VALUES (%s, %s)', (message_id, "quran"))
                     conn.commit()
+                logger.info("Successfully updated database with new message IDs")
             except Exception as e:
                 logger.error(f"Error managing Quran messages in database: {e}")
+                logger.error(traceback.format_exc())
                 conn.rollback()
             finally:
                 release_db_connection(conn)
         else:
             logger.error("Failed to send Quran pages: No message IDs returned")
     except Exception as e:
-        logger.error(f"Error sending Quran pages: {e}", exc_info=True)
+        logger.error(f"Error sending Quran pages: {e}")
+        logger.error(traceback.format_exc())
+    finally:
+        logger.info("Exiting send_quran_pages function")
 
 async def send_prayer_notification(prayer_name):
     logger.info(f"Sending prayer notification for {prayer_name}")
