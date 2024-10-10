@@ -11,6 +11,9 @@ from psycopg2.extras import DictCursor
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.interval import IntervalTrigger
+import traceback
+from telegram import InputMediaPhoto
+
 
 # Constants
 TOKEN = os.environ['TELEGRAM_BOT_TOKEN']
@@ -101,6 +104,19 @@ async def delete_message(chat_id, message_id):
     except Exception as e:
         logger.error(f"Error deleting message: {e}")
 
+async def send_media_group(chat_id, media):
+    try:
+        logger.info(f"Sending media group to chat {chat_id}")
+        media_group = [InputMediaPhoto(media=item["media"], caption=item.get("caption")) for item in media]
+        messages = await bot.send_media_group(chat_id=chat_id, media=media_group)
+        logger.info(f"Successfully sent media group. Number of messages: {len(messages)}")
+        return [message.message_id for message in messages]
+    except Exception as e:
+        logger.error(f"Error in send_media_group: {e}")
+        logger.error(traceback.format_exc())
+        return None
+
+
 async def send_athkar(athkar_type):
     logger.info(f"Sending {athkar_type} Athkar")
     caption = "#أذكار_الصباح" if athkar_type == "morning" else "#أذكار_المساء"
@@ -132,7 +148,6 @@ async def send_athkar(athkar_type):
     else:
         logger.error("Failed to send Athkar message")
 
-
 def get_next_quran_pages():
     logger.info("Entering get_next_quran_pages function")
     conn = get_db_connection()
@@ -141,16 +156,16 @@ def get_next_quran_pages():
             cur.execute('SELECT last_page FROM quran_progress WHERE id = 1')
             result = cur.fetchone()
             logger.debug(f"Database query result: {result}")
-            if result:
+            if result and result['last_page'] is not None:
                 last_page = result['last_page']
+                next_page = last_page + 1
+                if next_page > 604:
+                    next_page = 220
             else:
-                last_page = 219  # Start from page 220
-                cur.execute('INSERT INTO quran_progress (id, last_page) VALUES (1, 219)')
-                logger.info("Inserted initial quran_progress record")
-            next_page = last_page + 1
-            if next_page > 604:
-                next_page = 220  # Reset to 220 instead of 1
-            cur.execute('UPDATE quran_progress SET last_page = %s WHERE id = 1', (next_page,))
+                logger.info("No valid entry in database, starting from page 220")
+                next_page = 220
+            
+            cur.execute('INSERT INTO quran_progress (id, last_page) VALUES (1, %s) ON CONFLICT (id) DO UPDATE SET last_page = %s', (next_page, next_page))
             conn.commit()
             
             logger.info(f"Next Quran pages: {next_page} and {next_page + 1 if next_page < 604 else 220}")
@@ -162,7 +177,6 @@ def get_next_quran_pages():
     finally:
         release_db_connection(conn)
         logger.info("Exiting get_next_quran_pages function")
-
 
 async def send_quran_pages():
     logger.info("Entering send_quran_pages function")
