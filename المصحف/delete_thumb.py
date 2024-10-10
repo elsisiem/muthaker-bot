@@ -1,60 +1,34 @@
 import os
 import re
 
-# Define the folder path
-folder_path = r"C:\Users\hatem\OneDrive\Desktop\FazkerBot\المصحف"
+# Define the directory containing your images
+directory = r"C:\Users\hatem\OneDrive\Documents\GitHub\muthaker-bot\المصحف"
 
-# Set the starting point for renaming
-start_number = 588
+# Get a list of all files in the directory
+files = os.listdir(directory)
 
-# Loop through all files in the folder
-for filename in os.listdir(folder_path):
-    # Construct the full file path
-    full_path = os.path.join(folder_path, filename)
+# Step 1: Rename all files to a temporary format to avoid conflicts
+for filename in files:
+    match = re.match(r'photo_(-?\d+)\.jpg', filename)
+    if match:
+        temp_filename = f"temp_{filename}"
+        os.rename(os.path.join(directory, filename), os.path.join(directory, temp_filename))
 
-    # Check if the file is a thumbnail
-    if filename.endswith("_thumb.jpg"):
-        try:
-            # Delete the thumbnail file
-            os.remove(full_path)
-            print(f"Deleted: {full_path}")
-        except Exception as e:
-            print(f"Error deleting {full_path}: {e}")
+# Step 2: Rename them from the temporary format to the final format
+temp_files = os.listdir(directory)
 
-    # Check if the file is an actual photo
-    elif filename.endswith(".jpg"):
-        # Remove duplicate .jpg extension if it exists
-        if filename.count(".jpg") > 1:
-            new_filename = re.sub(r"(\.jpg)+$", ".jpg", filename)
-            new_photo_path = os.path.join(folder_path, new_filename)
+for temp_filename in temp_files:
+    match = re.match(r'temp_photo_(-?\d+)\.jpg', temp_filename)
+    if match:
+        number = int(match.group(1))
+        
+        if -1 <= number <= 98:
+            new_number = number + 1
+        else:
+            continue
+        
+        new_filename = f"photo_{new_number}.jpg"
+        os.rename(os.path.join(directory, temp_filename), os.path.join(directory, new_filename))
+        print(f'Renamed: {temp_filename} -> {new_filename}')
 
-            try:
-                os.rename(full_path, new_photo_path)
-                print(f"Renamed: {full_path} to {new_photo_path}")
-            except Exception as e:
-                print(f"Error renaming {full_path}: {e}")
-
-            # Update the full path to the new name for further processing
-            full_path = new_photo_path
-            filename = new_filename
-
-        # Rename the actual photo based on its prefix
-        if "photo_" in filename:
-            # Extract the current number from the filename
-            match = re.search(r'photo_(\d+)', filename)
-            if match:
-                current_number = int(match.group(1))
-                # Check if the current number is less than or equal to the start number
-                if current_number <= start_number:
-                    # Decrement the number
-                    new_number = current_number - 1
-                    new_filename = f"photo_{new_number}.jpg"
-                    new_photo_path = os.path.join(folder_path, new_filename)
-
-                    try:
-                        os.rename(full_path, new_photo_path)
-                        print(f"Renamed: {full_path} to {new_photo_path}")
-                    except Exception as e:
-                        print(f"Error renaming {full_path}: {e}")
-
-print("Operation completed.")
+print("Renaming complete!")
