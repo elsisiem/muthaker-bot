@@ -133,7 +133,6 @@ async def send_athkar(athkar_type):
         logger.error("Failed to send Athkar message")
 
 
-# Refactored get_next_quran_pages function
 def get_next_quran_pages():
     logger.info("Entering get_next_quran_pages function")
     conn = get_db_connection()
@@ -142,35 +141,29 @@ def get_next_quran_pages():
             cur.execute('SELECT last_page FROM quran_progress WHERE id = 1')
             result = cur.fetchone()
             logger.debug(f"Database query result: {result}")
-            
-            # Determine the last_page value
-            last_page = result['last_page'] if result else 219  # Start from page 220
-            
-            if not result:
+            if result:
+                last_page = result['last_page']
+            else:
+                last_page = 219  # Start from page 220
                 cur.execute('INSERT INTO quran_progress (id, last_page) VALUES (1, 219)')
-                logger.info("Inserted initial quran_progress record with page 219")
-
+                logger.info("Inserted initial quran_progress record")
             next_page = last_page + 1
-            # Reset next_page to 220 if it exceeds the total pages
             if next_page > 604:
-                next_page = 220
-
+                next_page = 220  # Reset to 220 instead of 1
             cur.execute('UPDATE quran_progress SET last_page = %s WHERE id = 1', (next_page,))
             conn.commit()
-
+            
             logger.info(f"Next Quran pages: {next_page} and {next_page + 1 if next_page < 604 else 220}")
             return next_page, next_page + 1 if next_page < 604 else 220
-
     except Exception as e:
         logger.error(f"Error getting next Quran pages: {e}")
         logger.error(traceback.format_exc())
         return 220, 221  # Return default values in case of error
-
     finally:
         release_db_connection(conn)
         logger.info("Exiting get_next_quran_pages function")
 
-# Refactored send_quran_pages function
+
 async def send_quran_pages():
     logger.info("Entering send_quran_pages function")
     page1, page2 = get_next_quran_pages()
@@ -178,22 +171,19 @@ async def send_quran_pages():
     page_2_url = f"{QURAN_PAGES_URL}/photo_{page2}.jpg"
     
     logger.info(f"Quran page URLs: {page_1_url}, {page_2_url}")
-
-    # Verify that both images exist
+    
+    # Verify that the images exist
     async with aiohttp.ClientSession() as session:
         for url in [page_1_url, page_2_url]:
             try:
                 async with session.get(url) as response:
                     logger.info(f"GET request for {url}: status {response.status}")
-                    
-                    # If the image isn't found, log and exit
                     if response.status != 200:
                         logger.error(f"Image not found: {url}")
                         return
-                    
-                    # Check the first 10 bytes for JPEG signature
+                    # Read a small part of the response to ensure it's an image
                     content = await response.content.read(10)
-                    if not content.startswith(b'\xff\xd8'):  # JPEG file signature check
+                    if not content.startswith(b'\xff\xd8'):  # JPEG file signature
                         logger.error(f"URL does not point to a valid JPEG image: {url}")
                         return
             except Exception as e:
@@ -201,7 +191,6 @@ async def send_quran_pages():
                 logger.error(traceback.format_exc())
                 return
     
-    # Prepare the media list to send
     media = [
         {"type": "photo", "media": page_1_url},
         {"type": "photo", "media": page_2_url, "caption": "#ورد_اليوم"}
@@ -233,7 +222,6 @@ async def send_quran_pages():
         logger.error(traceback.format_exc())
     finally:
         logger.info("Exiting send_quran_pages function")
-
 
 async def send_prayer_notification(prayer_name):
     logger.info(f"Sending prayer notification for {prayer_name}")
