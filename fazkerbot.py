@@ -82,22 +82,21 @@ def get_next_quran_pages():
             if result:
                 last_page = result['last_page']
             else:
-                last_page = 0  # Start from page 1
-                cur.execute('INSERT INTO quran_progress (id, last_page) VALUES (1, 0)')
+                last_page = 219  # Start from page 220
+                cur.execute('INSERT INTO quran_progress (id, last_page) VALUES (1, 219)')
                 logger.info("Inserted initial quran_progress record")
             next_page = last_page + 1
             if next_page > 604:
-                next_page = 1
+                next_page = 220  # Reset to 220 instead of 1
             cur.execute('UPDATE quran_progress SET last_page = %s WHERE id = 1', (next_page,))
             conn.commit()
             
-            logger.info(f"Next Quran pages: {next_page} and {next_page + 1 if next_page < 604 else 1}")
-            return next_page, next_page + 1 if next_page < 604 else 1
+            logger.info(f"Next Quran pages: {next_page} and {next_page + 1 if next_page < 604 else 220}")
+            return next_page, next_page + 1 if next_page < 604 else 220
     except Exception as e:
         logger.error(f"Error getting next Quran pages: {e}")
         logger.error(traceback.format_exc())
-        conn.rollback()
-        return None, None
+        return 220, 221  # Return default values in case of error
     finally:
         release_db_connection(conn)
         logger.info("Exiting get_next_quran_pages function")
@@ -166,9 +165,6 @@ async def send_athkar(athkar_type):
 async def send_quran_pages():
     logger.info("Entering send_quran_pages function")
     page1, page2 = get_next_quran_pages()
-    if page1 is None or page2 is None:
-        logger.error("Failed to get next Quran pages")
-        return
     page_1_url = f"{QURAN_PAGES_URL}/photo_{page1}.jpg"
     page_2_url = f"{QURAN_PAGES_URL}/photo_{page2}.jpg"
     
@@ -178,10 +174,15 @@ async def send_quran_pages():
     async with aiohttp.ClientSession() as session:
         for url in [page_1_url, page_2_url]:
             try:
-                async with session.head(url) as response:
-                    logger.info(f"HEAD request for {url}: status {response.status}")
+                async with session.get(url) as response:
+                    logger.info(f"GET request for {url}: status {response.status}")
                     if response.status != 200:
                         logger.error(f"Image not found: {url}")
+                        return
+                    # Read a small part of the response to ensure it's an image
+                    content = await response.content.read(10)
+                    if not content.startswith(b'\xff\xd8'):  # JPEG file signature
+                        logger.error(f"URL does not point to a valid JPEG image: {url}")
                         return
             except Exception as e:
                 logger.error(f"Error checking image URL {url}: {e}")
@@ -219,7 +220,7 @@ async def send_quran_pages():
         logger.error(traceback.format_exc())
     finally:
         logger.info("Exiting send_quran_pages function")
-
+        
 async def send_prayer_notification(prayer_name):
     logger.info(f"Sending prayer notification for {prayer_name}")
     prayer_image_url = f"{MISC_URL}/حي_على_الصلاة.png"
