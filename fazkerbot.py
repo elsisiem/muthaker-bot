@@ -80,23 +80,24 @@ def get_next_quran_pages():
             if result:
                 last_page = result['last_page']
             else:
-                last_page = 219  # Start from page 220
-                cur.execute('INSERT INTO quran_progress (id, last_page) VALUES (1, 219)')
+                last_page = 219  # Start from page 1
+                cur.execute('INSERT INTO quran_progress (id, last_page) VALUES (1, 0)')
 
-            next_page = last_page + 2
+            next_page = last_page + 1
             if next_page > 604:
                 next_page = 1
 
             cur.execute('UPDATE quran_progress SET last_page = %s WHERE id = 1', (next_page,))
             conn.commit()
+            
+            logger.info(f"Next Quran pages: {next_page} and {next_page + 1}")
+            return next_page, next_page + 1 if next_page < 604 else 1
     except Exception as e:
-        logger.error(f"Error getting next Quran pages: {e}")
+        logger.error(f"Error getting next Quran pages: {e}", exc_info=True)
         conn.rollback()
         return None, None
     finally:
         release_db_connection(conn)
-
-    return next_page, next_page + 1
 
 async def send_message(chat_id, text, parse_mode='HTML'):
     try:
@@ -131,7 +132,7 @@ async def delete_message(chat_id, message_id):
 async def send_athkar(athkar_type):
     logger.info(f"Sending {athkar_type} Athkar")
     caption = "#أذكار_الصباح" if athkar_type == "morning" else "#أذكار_المساء"
-    image_url = f"{ATHKAR_URL}/{'أذاكر_الصباح' if athkar_type == 'morning' else 'أذكار_المساء'}.jpg"
+    image_url = f"{ATHKAR_URL}/{'أذكار_الصباح' if athkar_type == 'morning' else 'أذكار_المساء'}.jpg"
     
     message_id = await send_photo(CHAT_ID, image_url, caption)
     
@@ -169,27 +170,44 @@ async def send_quran_pages():
     page_1_url = f"{QURAN_PAGES_URL}/photo_{page1}.jpg"
     page_2_url = f"{QURAN_PAGES_URL}/photo_{page2}.jpg"
     
+    logger.debug(f"Quran page URLs: {page_1_url}, {page_2_url}")
+
+    # Verify that the images exist
+    async with aiohttp.ClientSession() as session:
+        for url in [page_1_url, page_2_url]:
+            try:
+                async with session.head(url) as response:
+                    if response.status != 200:
+                        logger.error(f"Image not found: {url}")
+                        return
+            except Exception as e:
+                logger.error(f"Error checking image URL {url}: {e}")
+                return
+
     media = [
         {"type": "photo", "media": page_1_url},
         {"type": "photo", "media": page_2_url, "caption": "#ورد_اليوم"}
     ]
     
-    message_ids = await send_media_group(CHAT_ID, media)
-    
-    if message_ids:
-        conn = get_db_connection()
-        try:
-            with conn.cursor() as cur:
-                for message_id in message_ids:
-                    cur.execute('INSERT INTO messages (message_id, message_type) VALUES (%s, %s)', (message_id, "quran"))
-                conn.commit()
-        except Exception as e:
-            logger.error(f"Error managing Quran messages in database: {e}")
-            conn.rollback()
-        finally:
-            release_db_connection(conn)
-    else:
-        logger.error("Failed to send Quran pages")
+    try:
+        message_ids = await send_media_group(CHAT_ID, media)
+        
+        if message_ids:
+            conn = get_db_connection()
+            try:
+                with conn.cursor() as cur:
+                    for message_id in message_ids:
+                        cur.execute('INSERT INTO messages (message_id, message_type) VALUES (%s, %s)', (message_id, "quran"))
+                    conn.commit()
+            except Exception as e:
+                logger.error(f"Error managing Quran messages in database: {e}")
+                conn.rollback()
+            finally:
+                release_db_connection(conn)
+        else:
+            logger.error("Failed to send Quran pages: No message IDs returned")
+    except Exception as e:
+        logger.error(f"Error sending Quran pages: {e}", exc_info=True)
 
 async def send_prayer_notification(prayer_name):
     logger.info(f"Sending prayer notification for {prayer_name}")
@@ -274,7 +292,7 @@ async def test_all_functions():
         'Maghrib': '18:00',
         'Isha': '20:00'
     }
-    
+
     # Mock fetch_prayer_times function
     async def mock_fetch_prayer_times():
         return test_prayers
