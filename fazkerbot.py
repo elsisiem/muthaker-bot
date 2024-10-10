@@ -99,6 +99,11 @@ def get_next_quran_pages():
     finally:
         release_db_connection(conn)
 
+    return next_page, next_page + 1
+
+
+
+
 async def send_message(chat_id, text, parse_mode='HTML'):
     try:
         message = await bot.send_message(chat_id=chat_id, text=text, parse_mode=parse_mode)
