@@ -1,19 +1,14 @@
 import os
 import logging
-import requests
 import pytz
 from datetime import datetime, timedelta
 import asyncio
 import aiohttp
-from telegram import Bot
+from telegram import Bot, InputMediaPhoto
 from psycopg2 import pool
 from psycopg2.extras import DictCursor
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.date import DateTrigger
-from apscheduler.triggers.interval import IntervalTrigger
-import traceback
-from telegram import InputMediaPhoto
-
 
 # Constants
 TOKEN = os.environ['TELEGRAM_BOT_TOKEN']
@@ -26,7 +21,6 @@ API_PARAMS = {'city': 'Cairo', 'country': 'Egypt', 'method': 3}
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/elsisiem/muthaker-bot/master"
 QURAN_PAGES_URL = f"{GITHUB_RAW_URL}/%D8%A7%D9%84%D9%85%D8%B5%D8%AD%D9%81"
 ATHKAR_URL = f"{GITHUB_RAW_URL}/%D8%A7%D9%84%D8%A3%D8%B0%D9%83%D8%A7%D8%B1"
-MISC_URL = f"{GITHUB_RAW_URL}/%D9%85%D9%86%D9%88%D8%B9"
 
 # Setup logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -92,20 +86,6 @@ async def send_photo(chat_id, photo_url, caption=None):
 
 async def send_media_group(chat_id, media):
     try:
-        messages = await bot.send_media_group(chat_id=chat_id, media=media)
-        return [message.message_id for message in messages]
-    except Exception as e:
-        logger.error(f"Error sending media group: {e}")
-        return None
-
-async def delete_message(chat_id, message_id):
-    try:
-        await bot.delete_message(chat_id=chat_id, message_id=message_id)
-    except Exception as e:
-        logger.error(f"Error deleting message: {e}")
-
-async def send_media_group(chat_id, media):
-    try:
         logger.info(f"Sending media group to chat {chat_id}")
         media_group = [InputMediaPhoto(media=item["media"], caption=item.get("caption")) for item in media]
         messages = await bot.send_media_group(chat_id=chat_id, media=media_group)
@@ -113,9 +93,13 @@ async def send_media_group(chat_id, media):
         return [message.message_id for message in messages]
     except Exception as e:
         logger.error(f"Error in send_media_group: {e}")
-        logger.error(traceback.format_exc())
         return None
 
+async def delete_message(chat_id, message_id):
+    try:
+        await bot.delete_message(chat_id=chat_id, message_id=message_id)
+    except Exception as e:
+        logger.error(f"Error deleting message: {e}")
 
 async def send_athkar(athkar_type):
     logger.info(f"Sending {athkar_type} Athkar")
@@ -165,14 +149,15 @@ def get_next_quran_pages():
                 logger.info("No valid entry in database, starting from page 220")
                 next_page = 220
             
-            cur.execute('INSERT INTO quran_progress (id, last_page) VALUES (1, %s) ON CONFLICT (id) DO UPDATE SET last_page = %s', (next_page, next_page))
+            next_next_page = next_page + 1 if next_page < 604 else 220
+            
+            cur.execute('INSERT INTO quran_progress (id, last_page) VALUES (1, %s) ON CONFLICT (id) DO UPDATE SET last_page = %s', (next_next_page, next_next_page))
             conn.commit()
             
-            logger.info(f"Next Quran pages: {next_page} and {next_page + 1 if next_page < 604 else 220}")
-            return next_page, next_page + 1 if next_page < 604 else 220
+            logger.info(f"Next Quran pages: {next_page} and {next_next_page}")
+            return next_page, next_next_page
     except Exception as e:
         logger.error(f"Error getting next Quran pages: {e}")
-        logger.error(traceback.format_exc())
         return 220, 221  # Return default values in case of error
     finally:
         release_db_connection(conn)
@@ -202,7 +187,6 @@ async def send_quran_pages():
                         return
             except Exception as e:
                 logger.error(f"Error checking image URL {url}: {e}")
-                logger.error(traceback.format_exc())
                 return
     
     media = [
@@ -225,7 +209,6 @@ async def send_quran_pages():
                 logger.info("Successfully updated database with new message IDs")
             except Exception as e:
                 logger.error(f"Error managing Quran messages in database: {e}")
-                logger.error(traceback.format_exc())
                 conn.rollback()
             finally:
                 release_db_connection(conn)
@@ -233,30 +216,8 @@ async def send_quran_pages():
             logger.error("Failed to send Quran pages: No message IDs returned")
     except Exception as e:
         logger.error(f"Error sending Quran pages: {e}")
-        logger.error(traceback.format_exc())
     finally:
         logger.info("Exiting send_quran_pages function")
-
-async def send_prayer_notification(prayer_name):
-    logger.info(f"Sending prayer notification for {prayer_name}")
-    prayer_image_url = f"{MISC_URL}/حي_على_الصلاة.png"
-    caption = f"صلاة {prayer_name}"
-    
-    message_id = await send_photo(CHAT_ID, prayer_image_url, caption)
-    
-    if message_id:
-        conn = get_db_connection()
-        try:
-            with conn.cursor() as cur:
-                cur.execute('INSERT INTO messages (message_id, message_type) VALUES (%s, %s)', (message_id, "prayer"))
-                conn.commit()
-        except Exception as e:
-            logger.error(f"Error managing prayer notification in database: {e}")
-            conn.rollback()
-        finally:
-            release_db_connection(conn)
-    else:
-        logger.error(f"Failed to send prayer notification for {prayer_name}")
 
 async def schedule_tasks():
     try:
@@ -268,33 +229,37 @@ async def schedule_tasks():
         logger.debug(f"Fetched prayer times: {prayer_times}")
         
         now = datetime.now(CAIRO_TZ)
-        schedule_info = []
-
+        
         for prayer, time_str in prayer_times.items():
-            if prayer in ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha']:
+            if prayer in ['Fajr', 'Asr']:
                 prayer_time = CAIRO_TZ.localize(datetime.strptime(f"{now.date()} {time_str}", "%Y-%m-%d %H:%M"))
                 
                 if prayer == 'Fajr':
                     athkar_time = prayer_time + timedelta(minutes=35)
-                    scheduler.add_job(send_athkar, trigger=DateTrigger(run_date=athkar_time, timezone=CAIRO_TZ), args=["morning"])
+                    scheduler.add_job(
+                        send_athkar,
+                        trigger=DateTrigger(run_date=athkar_time, timezone=CAIRO_TZ),
+                        args=["morning"],
+                        misfire_grace_time=300  # 5 minutes grace time
+                    )
                     logger.debug(f"Scheduled morning Athkar for {athkar_time}")
-                    schedule_info.append(f"Morning Athkar: {athkar_time.strftime('%H:%M')}")
                 
                 elif prayer == 'Asr':
                     athkar_time = prayer_time + timedelta(minutes=35)
                     quran_time = prayer_time + timedelta(minutes=45)
-                    scheduler.add_job(send_athkar, trigger=DateTrigger(run_date=athkar_time, timezone=CAIRO_TZ), args=["night"])
-                    scheduler.add_job(send_quran_pages, trigger=DateTrigger(run_date=quran_time, timezone=CAIRO_TZ))
+                    scheduler.add_job(
+                        send_athkar,
+                        trigger=DateTrigger(run_date=athkar_time, timezone=CAIRO_TZ),
+                        args=["night"],
+                        misfire_grace_time=300  # 5 minutes grace time
+                    )
+                    scheduler.add_job(
+                        send_quran_pages,
+                        trigger=DateTrigger(run_date=quran_time, timezone=CAIRO_TZ),
+                        misfire_grace_time=300  # 5 minutes grace time
+                    )
                     logger.debug(f"Scheduled night Athkar for {athkar_time} and Quran pages for {quran_time}")
-                    schedule_info.append(f"Night Athkar: {athkar_time.strftime('%H:%M')}")
-                    schedule_info.append(f"Quran Pages: {quran_time.strftime('%H:%M')}")
-                
-                scheduler.add_job(send_prayer_notification, trigger=DateTrigger(run_date=prayer_time, timezone=CAIRO_TZ), args=[prayer])
-                logger.debug(f"Scheduled {prayer} prayer notification for {prayer_time}")
-                schedule_info.append(f"{prayer} Prayer: {prayer_time.strftime('%H:%M')}")
 
-        schedule_message = "Today's Schedule:\n" + "\n".join(schedule_info)
-        await send_message(CHAT_ID, schedule_message)
         logger.info(f"Tasks scheduled for {now.date()}")
     except Exception as e:
         logger.error(f"Error in schedule_tasks: {e}", exc_info=True)
@@ -311,55 +276,9 @@ async def heartbeat():
         logger.info("Heartbeat: Bot is still running")
         await asyncio.sleep(60)  # Every minute
 
-async def test_all_functions():
-    logger.info("Starting test of all functions")
-    test_prayers = {
-        'Fajr': '05:00',
-        'Dhuhr': '12:00',
-        'Asr': '15:00',
-        'Maghrib': '18:00',
-        'Isha': '20:00'
-    }
-
-    # Mock fetch_prayer_times function
-    async def mock_fetch_prayer_times():
-        return test_prayers
-
-    # Store the original function
-    original_fetch_prayer_times = globals()['fetch_prayer_times']
-    # Replace with mock function
-    globals()['fetch_prayer_times'] = mock_fetch_prayer_times
-
-    try:
-        # Schedule tasks
-        await schedule_tasks()
-
-        # Wait for a short time to allow scheduled jobs to run
-        await asyncio.sleep(5)
-
-        # Manually trigger each function
-        await send_athkar("morning")
-        await asyncio.sleep(5)
-        await send_athkar("night")
-        await asyncio.sleep(5)
-        await send_quran_pages()
-        await asyncio.sleep(5)
-        for prayer in test_prayers.keys():
-            await send_prayer_notification(prayer)
-            await asyncio.sleep(5)
-
-    finally:
-        # Restore the original function
-        globals()['fetch_prayer_times'] = original_fetch_prayer_times
-
-    logger.info("Test of all functions completed")
-
 async def main():
     await test_telegram_connection()
     asyncio.create_task(heartbeat())
-
-    # Run the test case once at startup
-    await test_all_functions()
 
     last_scheduled_date = None
     while True:
