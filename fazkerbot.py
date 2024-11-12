@@ -281,6 +281,24 @@ from aiohttp import web
 async def handle(request):
     return web.Response(text="Bot is running!")
 
+async def send_test_message():
+    """Send an immediate test message with current prayer times"""
+    try:
+        prayer_times = await fetch_prayer_times()
+        if prayer_times:
+            now = datetime.now(CAIRO_TZ)
+            test_msg = f"🕌 Bot Test Message\n"
+            test_msg += f"Current time: {now.strftime('%H:%M')}\n\n"
+            test_msg += "Prayer times for today:\n"
+            for prayer, time in prayer_times.items():
+                if prayer in ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha']:
+                    test_msg += f"{prayer}: {time}\n"
+            
+            await send_message(CHAT_ID, test_msg)
+            logger.info("Test message sent successfully")
+    except Exception as e:
+        logger.error(f"Error sending test message: {e}")
+
 async def main():
     # Setup web app
     app = web.Application()
@@ -294,8 +312,15 @@ async def main():
     await site.start()
     logger.info(f"Web server started on port {port}")
 
-    # Start bot operations
+    # Test Telegram connection and send immediate test message
     await test_telegram_connection()
+    await send_test_message()
+    logger.info("Initializing scheduler...")
+    
+    # Start initial scheduling
+    await schedule_tasks()
+    logger.info("Initial tasks scheduled")
+    
     asyncio.create_task(heartbeat())
 
     last_scheduled_date = None
@@ -308,9 +333,13 @@ async def main():
                 logger.info(f"Scheduling tasks for new date: {current_date}")
                 await schedule_tasks()
                 last_scheduled_date = current_date
-            else:
-                logger.debug(f"No new scheduling needed")
-
+                
+                # Log all scheduled jobs
+                jobs = scheduler.get_jobs()
+                logger.info("Currently scheduled jobs:")
+                for job in jobs:
+                    logger.info(f"Job: {job.id} - Next run: {job.next_run_time}")
+            
             await asyncio.sleep(300)
         except Exception as e:
             logger.error(f"Error in main loop: {e}", exc_info=True)
