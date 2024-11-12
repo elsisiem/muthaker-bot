@@ -276,25 +276,7 @@ async def heartbeat():
         logger.info("Heartbeat: Bot is still running")
         await asyncio.sleep(60)  # Every minute
 
-from aiohttp import web
-
-async def handle(request):
-    return web.Response(text="Bot is running!")
-
 async def main():
-    # Setup web app
-    app = web.Application()
-    app.router.add_get("/", handle)
-    
-    # Start web server
-    port = int(os.environ.get('PORT', 8080))
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
-    logger.info(f"Web server started on port {port}")
-
-    # Start bot operations
     await test_telegram_connection()
     asyncio.create_task(heartbeat())
 
@@ -309,12 +291,13 @@ async def main():
                 await schedule_tasks()
                 last_scheduled_date = current_date
             else:
-                logger.debug(f"No new scheduling needed")
+                logger.debug(f"No new scheduling needed. Current date: {current_date}, Last scheduled: {last_scheduled_date}")
 
-            await asyncio.sleep(300)
+            # Use asyncio.sleep() to allow other tasks to run
+            await asyncio.sleep(300)  # Check every 5 minutes
         except Exception as e:
             logger.error(f"Error in main loop: {e}", exc_info=True)
-            await asyncio.sleep(60)
+            await asyncio.sleep(60)  # Wait a minute before retrying
 
 if __name__ == "__main__":
     try:
