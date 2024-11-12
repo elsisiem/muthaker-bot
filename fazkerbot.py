@@ -4,8 +4,9 @@ import pytz
 from datetime import datetime, timedelta
 import asyncio
 import aiohttp
+from aiohttp import web
 from telegram import Bot, InputMediaPhoto
-from psycopg2 import pool
+from psycopg2 import pool, OperationalError
 from psycopg2.extras import DictCursor
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.date import DateTrigger
@@ -22,6 +23,10 @@ GITHUB_RAW_URL = "https://raw.githubusercontent.com/elsisiem/muthaker-bot/master
 QURAN_PAGES_URL = f"{GITHUB_RAW_URL}/%D8%A7%D9%84%D9%85%D8%B5%D8%AD%D9%81"
 ATHKAR_URL = f"{GITHUB_RAW_URL}/%D8%A7%D9%84%D8%A3%D8%B0%D9%83%D8%A7%D8%B1"
 
+# Add Heroku-specific constants
+PORT = int(os.environ.get('PORT', 8080))
+DYNO_URL = os.environ.get('HEROKU_APP_URL')  # Add this to your Heroku config vars
+
 # Setup logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -30,13 +35,57 @@ logger = logging.getLogger(__name__)
 bot = Bot(TOKEN)
 scheduler = AsyncIOScheduler(timezone=CAIRO_TZ)
 
-# Database setup with connection pooling
-min_connections = 1
-max_connections = 10
-connection_pool = pool.SimpleConnectionPool(min_connections, max_connections, DATABASE_URL, sslmode='require')
+# Modify database connection pool setup
+class DatabasePool:
+    def __init__(self):
+        self.pool = None
+        self.create_pool()
 
+    def create_pool(self):
+        try:
+            if self.pool is not None:
+                self.pool.closeall()
+            self.pool = pool.SimpleConnectionPool(
+                1, 5,  # Reduce max connections for Heroku basic dyno
+                DATABASE_URL,
+                sslmode='require',
+                connect_timeout=10
+            )
+            logger.info("Database pool created successfully")
+        except Exception as e:
+            logger.error(f"Error creating database pool: {e}")
+
+    async def health_check(self):
+        """Periodic database health check"""
+        while True:
+            try:
+                conn = self.pool.getconn()
+                with conn.cursor() as cur:
+                    cur.execute('SELECT 1')
+                self.pool.putconn(conn)
+                logger.debug("Database health check passed")
+            except (OperationalError, Exception) as e:
+                logger.error(f"Database health check failed: {e}")
+                self.create_pool()
+            await asyncio.sleep(300)  # Check every 5 minutes
+
+db_pool = DatabasePool()
+
+# Add web server routes for Heroku
+async def handle_keep_alive(request):
+    return web.Response(text="Bot is alive")
+
+app = web.Application()
+app.router.add_get("/", handle_keep_alive)
+
+# Modify database functions
 def get_db_connection():
-    return connection_pool.getconn()
+    try:
+        return db_pool.pool.getconn()
+    except Exception as e:
+        logger.error(f"Error getting database connection: {e}")
+        db_pool.create_pool()
+        return db_pool.pool.getconn()
 
 def release_db_connection(conn):
     connection_pool.putconn(conn)
@@ -132,36 +181,51 @@ async def send_athkar(athkar_type):
     else:
         logger.error("Failed to send Athkar message")
 
+# Modify get_next_quran_pages with better error handling
 def get_next_quran_pages():
-    logger.info("Entering get_next_quran_pages function")
-    conn = get_db_connection()
-    try:
-        with conn.cursor(cursor_factory=DictCursor) as cur:
-            cur.execute('SELECT last_page FROM quran_progress WHERE id = 1')
-            result = cur.fetchone()
-            logger.debug(f"Database query result: {result}")
-            if result and result['last_page'] is not None:
-                last_page = result['last_page']
-                next_page = last_page + 1
-                if next_page > 604:
+    retries = 3
+    while retries > 0:
+        conn = None
+        try:
+            conn = get_db_connection()
+            with conn.cursor(cursor_factory=DictCursor) as cur:
+                # First try to get the last page
+                cur.execute('SELECT last_page FROM quran_progress WHERE id = 1')
+                result = cur.fetchone()
+                
+                if result and result['last_page'] is not None:
+                    last_page = result['last_page']
+                    next_page = last_page + 1
+                    if next_page > 604:
+                        next_page = 220
+                else:
+                    # Initialize the table if empty
                     next_page = 220
-            else:
-                logger.info("No valid entry in database, starting from page 220")
-                next_page = 220
-            
-            next_next_page = next_page + 1 if next_page < 604 else 220
-            
-            cur.execute('INSERT INTO quran_progress (id, last_page) VALUES (1, %s) ON CONFLICT (id) DO UPDATE SET last_page = %s', (next_next_page, next_next_page))
-            conn.commit()
-            
-            logger.info(f"Next Quran pages: {next_page} and {next_next_page}")
-            return next_page, next_next_page
-    except Exception as e:
-        logger.error(f"Error getting next Quran pages: {e}")
-        return 220, 221  # Return default values in case of error
-    finally:
-        release_db_connection(conn)
-        logger.info("Exiting get_next_quran_pages function")
+                    cur.execute('INSERT INTO quran_progress (id, last_page) VALUES (1, 220) ON CONFLICT DO NOTHING')
+                
+                next_next_page = next_page + 1 if next_page < 604 else 220
+                
+                # Update with retry logic
+                cur.execute(
+                    'UPDATE quran_progress SET last_page = %s WHERE id = 1',
+                    (next_next_page,)
+                )
+                conn.commit()
+                return next_page, next_next_page
+                
+        except Exception as e:
+            logger.error(f"Database error (attempt {4-retries}/3): {e}")
+            if conn:
+                conn.rollback()
+            retries -= 1
+            if retries > 0:
+                time.sleep(1)
+        finally:
+            if conn:
+                db_pool.pool.putconn(conn)
+    
+    logger.error("All database retries failed, using default values")
+    return 220, 221
 
 async def send_quran_pages():
     logger.info("Entering send_quran_pages function")
@@ -219,6 +283,26 @@ async def send_quran_pages():
     finally:
         logger.info("Exiting send_quran_pages function")
 
+async def send_status_update(prayer_times):
+    """Send a status message about current prayer times and next scheduled tasks."""
+    now = datetime.now(CAIRO_TZ)
+    status_msg = "🕌 Bot Status Update:\n"
+    status_msg += f"Current time: {now.strftime('%H:%M')}\n\n"
+    
+    for prayer, time_str in prayer_times.items():
+        if prayer in ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha']:
+            prayer_time = CAIRO_TZ.localize(datetime.strptime(f"{now.date()} {time_str}", "%Y-%m-%d %H:%M"))
+            status_msg += f"{prayer}: {time_str}"
+            if prayer_time > now:
+                status_msg += " (⏳ Coming up)"
+            elif (now - prayer_time).total_seconds() < 3600:  # Within last hour
+                status_msg += " (✅ Recent)"
+            else:
+                status_msg += " (⌛️ Passed)"
+            status_msg += "\n"
+    
+    await send_message(CHAT_ID, status_msg)
+
 async def schedule_tasks():
     try:
         prayer_times = await fetch_prayer_times()
@@ -226,41 +310,64 @@ async def schedule_tasks():
             logger.error("Failed to fetch prayer times")
             return
 
-        logger.debug(f"Fetched prayer times: {prayer_times}")
-        
         now = datetime.now(CAIRO_TZ)
-        
+        logger.info(f"Scheduling tasks for {now.date()}")
+
+        # Clear existing jobs
+        scheduler.remove_all_jobs()
+
+        # Schedule status updates every minute
+        scheduler.add_job(
+            send_status_update,
+            'interval',
+            minutes=1,
+            args=[prayer_times],
+            next_run_time=datetime.now(CAIRO_TZ)
+        )
+
         for prayer, time_str in prayer_times.items():
             if prayer in ['Fajr', 'Asr']:
-                prayer_time = CAIRO_TZ.localize(datetime.strptime(f"{now.date()} {time_str}", "%Y-%m-%d %H:%M"))
-                
-                if prayer == 'Fajr':
-                    athkar_time = prayer_time + timedelta(minutes=35)
-                    scheduler.add_job(
-                        send_athkar,
-                        trigger=DateTrigger(run_date=athkar_time, timezone=CAIRO_TZ),
-                        args=["morning"],
-                        misfire_grace_time=300  # 5 minutes grace time
-                    )
-                    logger.debug(f"Scheduled morning Athkar for {athkar_time}")
-                
-                elif prayer == 'Asr':
-                    athkar_time = prayer_time + timedelta(minutes=35)
-                    quran_time = prayer_time + timedelta(minutes=45)
-                    scheduler.add_job(
-                        send_athkar,
-                        trigger=DateTrigger(run_date=athkar_time, timezone=CAIRO_TZ),
-                        args=["night"],
-                        misfire_grace_time=300  # 5 minutes grace time
-                    )
-                    scheduler.add_job(
-                        send_quran_pages,
-                        trigger=DateTrigger(run_date=quran_time, timezone=CAIRO_TZ),
-                        misfire_grace_time=300  # 5 minutes grace time
-                    )
-                    logger.debug(f"Scheduled night Athkar for {athkar_time} and Quran pages for {quran_time}")
+                try:
+                    prayer_time = CAIRO_TZ.localize(datetime.strptime(f"{now.date()} {time_str}", "%Y-%m-%d %H:%M"))
+                    
+                    # Adjust for next day if the prayer time has passed
+                    if prayer_time < now:
+                        prayer_time = prayer_time + timedelta(days=1)
 
-        logger.info(f"Tasks scheduled for {now.date()}")
+                    if prayer == 'Fajr':
+                        athkar_time = prayer_time + timedelta(minutes=35)
+                        scheduler.add_job(
+                            send_athkar,
+                            trigger=DateTrigger(run_date=athkar_time, timezone=CAIRO_TZ),
+                            args=["morning"],
+                            id=f"morning_athkar_{athkar_time.strftime('%Y%m%d')}",
+                            misfire_grace_time=300
+                        )
+                        logger.info(f"Scheduled morning Athkar for {athkar_time}")
+                    
+                    elif prayer == 'Asr':
+                        athkar_time = prayer_time + timedelta(minutes=35)
+                        quran_time = prayer_time + timedelta(minutes=45)
+                        
+                        scheduler.add_job(
+                            send_athkar,
+                            trigger=DateTrigger(run_date=athkar_time, timezone=CAIRO_TZ),
+                            args=["night"],
+                            id=f"night_athkar_{athkar_time.strftime('%Y%m%d')}",
+                            misfire_grace_time=300
+                        )
+                        
+                        scheduler.add_job(
+                            send_quran_pages,
+                            trigger=DateTrigger(run_date=quran_time, timezone=CAIRO_TZ),
+                            id=f"quran_{quran_time.strftime('%Y%m%d')}",
+                            misfire_grace_time=300
+                        )
+                        logger.info(f"Scheduled night Athkar for {athkar_time} and Quran for {quran_time}")
+                
+                except Exception as e:
+                    logger.error(f"Error scheduling {prayer}: {e}")
+
     except Exception as e:
         logger.error(f"Error in schedule_tasks: {e}", exc_info=True)
 
@@ -276,75 +383,53 @@ async def heartbeat():
         logger.info("Heartbeat: Bot is still running")
         await asyncio.sleep(60)  # Every minute
 
-from aiohttp import web
-
-async def handle(request):
-    return web.Response(text="Bot is running!")
-
-async def send_test_message():
-    """Send an immediate test message with current prayer times"""
-    try:
-        prayer_times = await fetch_prayer_times()
-        if prayer_times:
-            now = datetime.now(CAIRO_TZ)
-            test_msg = f"🕌 Bot Test Message\n"
-            test_msg += f"Current time: {now.strftime('%H:%M')}\n\n"
-            test_msg += "Prayer times for today:\n"
-            for prayer, time in prayer_times.items():
-                if prayer in ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha']:
-                    test_msg += f"{prayer}: {time}\n"
-            
-            await send_message(CHAT_ID, test_msg)
-            logger.info("Test message sent successfully")
-    except Exception as e:
-        logger.error(f"Error sending test message: {e}")
-
+# Modify main function to include web server and keep-alive
 async def main():
-    # Setup web app
-    app = web.Application()
-    app.router.add_get("/", handle)
-    
-    # Start web server
-    port = int(os.environ.get('PORT', 8080))
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
-    logger.info(f"Web server started on port {port}")
+    try:
+        # Start web server
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, '0.0.0.0', PORT)
+        await site.start()
+        logger.info(f"Web server started on port {PORT}")
 
-    # Test Telegram connection and send immediate test message
-    await test_telegram_connection()
-    await send_test_message()
-    logger.info("Initializing scheduler...")
-    
-    # Start initial scheduling
-    await schedule_tasks()
-    logger.info("Initial tasks scheduled")
-    
-    asyncio.create_task(heartbeat())
+        # Start database health check
+        asyncio.create_task(db_pool.health_check())
 
-    last_scheduled_date = None
-    while True:
-        try:
-            now = datetime.now(CAIRO_TZ)
-            current_date = now.date()
+        # Keep Heroku dyno alive
+        async def keep_alive():
+            if DYNO_URL:
+                while True:
+                    try:
+                        async with aiohttp.ClientSession() as session:
+                            await session.get(DYNO_URL)
+                            logger.debug("Keep-alive ping sent")
+                    except Exception as e:
+                        logger.error(f"Keep-alive error: {e}")
+                    await asyncio.sleep(1200)  # Ping every 20 minutes
 
-            if last_scheduled_date != current_date:
-                logger.info(f"Scheduling tasks for new date: {current_date}")
+        asyncio.create_task(keep_alive())
+
+        # Start bot operations
+        await test_telegram_connection()
+        await schedule_tasks()
+
+        # Reschedule every hour with error handling
+        while True:
+            try:
+                await asyncio.sleep(3600)
                 await schedule_tasks()
-                last_scheduled_date = current_date
-                
-                # Log all scheduled jobs
-                jobs = scheduler.get_jobs()
-                logger.info("Currently scheduled jobs:")
-                for job in jobs:
-                    logger.info(f"Job: {job.id} - Next run: {job.next_run_time}")
-            
-            await asyncio.sleep(300)
-        except Exception as e:
-            logger.error(f"Error in main loop: {e}", exc_info=True)
-            await asyncio.sleep(60)
+            except Exception as e:
+                logger.error(f"Error in main loop: {e}", exc_info=True)
+                await asyncio.sleep(60)
 
+    except Exception as e:
+        logger.critical(f"Critical error in main: {e}", exc_info=True)
+        # Attempt to restart the main function
+        await asyncio.sleep(60)
+        await main()
+
+# Modify startup code
 if __name__ == "__main__":
     try:
         scheduler.start()
@@ -354,4 +439,5 @@ if __name__ == "__main__":
         logger.critical(f"Critical error in main execution: {e}", exc_info=True)
     finally:
         scheduler.shutdown()
-        connection_pool.closeall()
+        if db_pool.pool:
+            db_pool.pool.closeall()
