@@ -234,25 +234,20 @@ async def schedule_tasks():
         now = datetime.now(CAIRO_TZ)
         today = now.date()
         tomorrow = today + timedelta(days=1)
-        
+
+        # Function to determine task time and if it should be scheduled for today
+        def get_task_time(prayer_time, minutes_after):
+            task_time = prayer_time + timedelta(minutes=minutes_after)
+            if task_time > now:
+                return task_time, True  # Schedule for today
+            return CAIRO_TZ.localize(datetime.strptime(f"{tomorrow} {prayer_time.strftime('%H:%M')}", "%Y-%m-%d %H:%M")) + timedelta(minutes=minutes_after), False
+
         for prayer, time_str in prayer_times.items():
             if prayer in ['Fajr', 'Asr']:
                 prayer_time = CAIRO_TZ.localize(datetime.strptime(f"{today} {time_str}", "%Y-%m-%d %H:%M"))
-                schedule_for_tomorrow = False
-                
-                # Only schedule for tomorrow if prayer time AND its associated tasks have passed
-                if prayer == 'Fajr':
-                    task_time = prayer_time + timedelta(minutes=35)
-                    schedule_for_tomorrow = task_time < now
-                elif prayer == 'Asr':
-                    last_task_time = prayer_time + timedelta(minutes=45)  # Quran pages time
-                    schedule_for_tomorrow = last_task_time < now
-                
-                if schedule_for_tomorrow:
-                    prayer_time = CAIRO_TZ.localize(datetime.strptime(f"{tomorrow} {time_str}", "%Y-%m-%d %H:%M"))
                 
                 if prayer == 'Fajr':
-                    athkar_time = prayer_time + timedelta(minutes=35)
+                    athkar_time, is_today = get_task_time(prayer_time, 35)
                     task = {
                         'type': 'morning_athkar',
                         'time': athkar_time,
@@ -269,8 +264,8 @@ async def schedule_tasks():
                     )
                 
                 elif prayer == 'Asr':
-                    athkar_time = prayer_time + timedelta(minutes=35)
-                    quran_time = prayer_time + timedelta(minutes=45)
+                    athkar_time, athkar_today = get_task_time(prayer_time, 35)
+                    quran_time, quran_today = get_task_time(prayer_time, 45)
                     next_pages = get_next_quran_pages()
                     
                     evening_task = {
@@ -346,7 +341,6 @@ async def send_status_message():
         if prayer_times:
             now = datetime.now(CAIRO_TZ)
             today = now.date()
-            tomorrow = today + timedelta(days=1)
 
             # Format message header
             status_msg = "🤖 *Bot Status Report*\n"
@@ -373,7 +367,6 @@ async def send_status_message():
             status_msg += "\n📋 *Today's Schedule*\n"
             remaining_tasks = False
             
-            # Sort tasks by time
             sorted_tasks = sorted(DAILY_TASKS, key=lambda x: x['time'])
             today_tasks = [task for task in sorted_tasks if task['time'].date() == today]
             
@@ -386,16 +379,14 @@ async def send_status_message():
                         remaining_tasks = True
                     else:
                         status_msg += f"✓ {task['description']} at {time_str}\n"
-                
-                if not remaining_tasks:
-                    status_msg += "✨ All tasks completed for today!\n"
             else:
-                status_msg += "No remaining tasks for today\n"
+                status_msg += "No tasks scheduled for today\n"
             
-            # Show tomorrow's events only if no remaining tasks today
+            # Show tomorrow's schedule if no remaining tasks
             if not remaining_tasks:
                 status_msg += "\n📅 *Tomorrow's Events*\n"
                 # Calculate tomorrow's prayer times and events
+                tomorrow = today + timedelta(days=1)
                 tomorrow_fajr = CAIRO_TZ.localize(datetime.strptime(f"{tomorrow} {prayer_times['Fajr']}", "%Y-%m-%d %H:%M"))
                 tomorrow_asr = CAIRO_TZ.localize(datetime.strptime(f"{tomorrow} {prayer_times['Asr']}", "%Y-%m-%d %H:%M"))
                 
