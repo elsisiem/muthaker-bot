@@ -332,33 +332,58 @@ async def send_status_message():
             
             # Prayer times
             status_msg += "🕌 *Prayer Times Today*\n"
+            
+            # Track if Asr has passed to determine schedule display
+            asr_passed = False
+            fajr_passed = False
+            
             for prayer, time in prayer_times.items():
                 if prayer in ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha']:
                     prayer_time = CAIRO_TZ.localize(datetime.strptime(f"{today} {time}", "%Y-%m-%d %H:%M"))
                     if prayer_time < now:
                         status_msg += f"✓ {prayer}: {time}\n"
+                        if prayer == 'Asr':
+                            asr_passed = True
+                        elif prayer == 'Fajr':
+                            fajr_passed = True
                     else:
                         time_until = format_time_until(prayer_time, now)
                         status_msg += f"⏳ {prayer}: {time} (in {time_until})\n"
             
             status_msg += "\n📋 *Today's Schedule*\n"
             
-            # Sort jobs by next run time
-            sorted_jobs = sorted(jobs, key=lambda x: x.next_run_time)
+            # Calculate upcoming events based on prayer times
+            asr_time = CAIRO_TZ.localize(datetime.strptime(f"{today} {prayer_times['Asr']}", "%Y-%m-%d %H:%M"))
+            fajr_time = CAIRO_TZ.localize(datetime.strptime(f"{today} {prayer_times['Fajr']}", "%Y-%m-%d %H:%M"))
             
-            for job in sorted_jobs:
-                job_time = job.next_run_time
-                if job_time:
-                    time_str = job_time.strftime('%H:%M')
-                    time_until = format_time_until(job_time, now)
-                    
-                    if "morning_athkar" in job.id:
-                        status_msg += f"🌅 Morning Athkar at {time_str} (in {time_until})\n"
-                    elif "night_athkar" in job.id:
-                        status_msg += f"🌙 Evening Athkar at {time_str} (in {time_until})\n"
-                    elif "quran_pages" in job.id:
-                        next_pages = get_next_quran_pages()
-                        status_msg += f"📖 Quran Pages {next_pages[0]}-{next_pages[1]} at {time_str} (in {time_until})\n"
+            if not asr_passed:
+                # Show today's Asr schedule
+                athkar_time = asr_time + timedelta(minutes=35)
+                quran_time = asr_time + timedelta(minutes=45)
+                
+                if athkar_time > now:
+                    time_until = format_time_until(athkar_time, now)
+                    status_msg += f"🌙 Evening Athkar at {athkar_time.strftime('%H:%M')} (in {time_until})\n"
+                
+                if quran_time > now:
+                    time_until = format_time_until(quran_time, now)
+                    next_pages = get_next_quran_pages()
+                    status_msg += f"📖 Quran Pages {next_pages[0]}-{next_pages[1]} at {quran_time.strftime('%H:%M')} (in {time_until})\n"
+            
+            if not fajr_passed:
+                # Show today's Fajr schedule
+                athkar_time = fajr_time + timedelta(minutes=35)
+                if athkar_time > now:
+                    time_until = format_time_until(athkar_time, now)
+                    status_msg += f"🌅 Morning Athkar at {athkar_time.strftime('%H:%M')} (in {time_until})\n"
+            
+            # If both Fajr and Asr have passed, show tomorrow's first schedule
+            if asr_passed and fajr_passed:
+                status_msg += "\n📅 *Tomorrow's First Event*\n"
+                tomorrow_fajr = CAIRO_TZ.localize(datetime.strptime(f"{tomorrow} {prayer_times['Fajr']}", "%Y-%m-%d %H:%M"))
+                tomorrow_athkar = tomorrow_fajr + timedelta(minutes=35)
+                time_until = format_time_until(tomorrow_athkar, now)
+                status_msg += f"🌅 Morning Athkar at {tomorrow_athkar.strftime('%H:%M')} (in {time_until})\n"
             
             status_msg += "\n⏱ *Next Status Update*\n"
             next_hour = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
