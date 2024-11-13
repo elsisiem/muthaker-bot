@@ -226,41 +226,61 @@ async def schedule_tasks():
             logger.error("Failed to fetch prayer times")
             return
 
-        logger.debug(f"Fetched prayer times: {prayer_times}")
+        logger.info(f"Fetched prayer times: {prayer_times}")
         
         now = datetime.now(CAIRO_TZ)
+        today = now.date()
+        tomorrow = today + timedelta(days=1)
         
         for prayer, time_str in prayer_times.items():
             if prayer in ['Fajr', 'Asr']:
-                prayer_time = CAIRO_TZ.localize(datetime.strptime(f"{now.date()} {time_str}", "%Y-%m-%d %H:%M"))
+                prayer_time = CAIRO_TZ.localize(datetime.strptime(f"{today} {time_str}", "%Y-%m-%d %H:%M"))
+                
+                # If prayer time has passed, schedule for tomorrow
+                if prayer_time < now:
+                    prayer_time = CAIRO_TZ.localize(datetime.strptime(f"{tomorrow} {time_str}", "%Y-%m-%d %H:%M"))
                 
                 if prayer == 'Fajr':
                     athkar_time = prayer_time + timedelta(minutes=35)
-                    scheduler.add_job(
+                    job = scheduler.add_job(
                         send_athkar,
                         trigger=DateTrigger(run_date=athkar_time, timezone=CAIRO_TZ),
                         args=["morning"],
-                        misfire_grace_time=300  # 5 minutes grace time
+                        id=f"morning_athkar_{athkar_time.strftime('%Y%m%d')}",
+                        replace_existing=True,
+                        misfire_grace_time=300
                     )
-                    logger.debug(f"Scheduled morning Athkar for {athkar_time}")
+                    logger.info(f"Scheduled morning Athkar for {athkar_time}, job ID: {job.id}")
                 
                 elif prayer == 'Asr':
                     athkar_time = prayer_time + timedelta(minutes=35)
                     quran_time = prayer_time + timedelta(minutes=45)
-                    scheduler.add_job(
+                    
+                    job1 = scheduler.add_job(
                         send_athkar,
                         trigger=DateTrigger(run_date=athkar_time, timezone=CAIRO_TZ),
                         args=["night"],
-                        misfire_grace_time=300  # 5 minutes grace time
+                        id=f"night_athkar_{athkar_time.strftime('%Y%m%d')}",
+                        replace_existing=True,
+                        misfire_grace_time=300
                     )
-                    scheduler.add_job(
+                    job2 = scheduler.add_job(
                         send_quran_pages,
                         trigger=DateTrigger(run_date=quran_time, timezone=CAIRO_TZ),
-                        misfire_grace_time=300  # 5 minutes grace time
+                        args=[],
+                        id=f"quran_pages_{quran_time.strftime('%Y%m%d')}",
+                        replace_existing=True,
+                        misfire_grace_time=300
                     )
-                    logger.debug(f"Scheduled night Athkar for {athkar_time} and Quran pages for {quran_time}")
+                    logger.info(f"Scheduled night Athkar for {athkar_time}, job ID: {job1.id}")
+                    logger.info(f"Scheduled Quran pages for {quran_time}, job ID: {job2.id}")
 
-        logger.info(f"Tasks scheduled for {now.date()}")
+        # Log all scheduled jobs
+        jobs = scheduler.get_jobs()
+        logger.info(f"Total scheduled jobs: {len(jobs)}")
+        for job in jobs:
+            logger.info(f"Job ID: {job.id}, Next run: {job.next_run_time}")
+
     except Exception as e:
         logger.error(f"Error in schedule_tasks: {e}", exc_info=True)
 
@@ -281,23 +301,74 @@ from aiohttp import web
 async def handle(request):
     return web.Response(text="Bot is running!")
 
-async def send_test_message():
-    """Send an immediate test message with current prayer times"""
+def format_time_until(target_time, now):
+    """Format time difference until target time in a human readable format"""
+    diff = target_time - now
+    hours = int(diff.total_seconds() // 3600)
+    minutes = int((diff.total_seconds() % 3600) // 60)
+    if hours > 0:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m"
+
+async def send_status_message():
+    """Send a detailed status message with schedule and countdown"""
     try:
         prayer_times = await fetch_prayer_times()
         if prayer_times:
             now = datetime.now(CAIRO_TZ)
-            test_msg = f"🕌 Bot Test Message\n"
-            test_msg += f"Current time: {now.strftime('%H:%M')}\n\n"
-            test_msg += "Prayer times for today:\n"
+            today = now.date()
+            tomorrow = today + timedelta(days=1)
+
+            # Get all scheduled jobs
+            jobs = scheduler.get_jobs()
+            
+            # Format message with emojis and markdown
+            status_msg = "🤖 *Bot Status Report*\n"
+            status_msg += "─────────────────\n\n"
+            
+            # Current time
+            status_msg += f"📅 Date: {today.strftime('%Y-%m-%d')}\n"
+            status_msg += f"🕐 Current time: {now.strftime('%H:%M')}\n\n"
+            
+            # Prayer times
+            status_msg += "🕌 *Prayer Times Today*\n"
             for prayer, time in prayer_times.items():
                 if prayer in ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha']:
-                    test_msg += f"{prayer}: {time}\n"
+                    prayer_time = CAIRO_TZ.localize(datetime.strptime(f"{today} {time}", "%Y-%m-%d %H:%M"))
+                    if prayer_time < now:
+                        status_msg += f"✓ {prayer}: {time}\n"
+                    else:
+                        time_until = format_time_until(prayer_time, now)
+                        status_msg += f"⏳ {prayer}: {time} (in {time_until})\n"
             
-            await send_message(CHAT_ID, test_msg)
-            logger.info("Test message sent successfully")
+            status_msg += "\n📋 *Today's Schedule*\n"
+            
+            # Sort jobs by next run time
+            sorted_jobs = sorted(jobs, key=lambda x: x.next_run_time)
+            
+            for job in sorted_jobs:
+                job_time = job.next_run_time
+                if job_time:
+                    time_str = job_time.strftime('%H:%M')
+                    time_until = format_time_until(job_time, now)
+                    
+                    if "morning_athkar" in job.id:
+                        status_msg += f"🌅 Morning Athkar at {time_str} (in {time_until})\n"
+                    elif "night_athkar" in job.id:
+                        status_msg += f"🌙 Evening Athkar at {time_str} (in {time_until})\n"
+                    elif "quran_pages" in job.id:
+                        next_pages = get_next_quran_pages()
+                        status_msg += f"📖 Quran Pages {next_pages[0]}-{next_pages[1]} at {time_str} (in {time_until})\n"
+            
+            status_msg += "\n⏱ *Next Status Update*\n"
+            next_hour = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+            time_to_next = format_time_until(next_hour, now)
+            status_msg += f"Next status report in {time_to_next}\n"
+            
+            await send_message(CHAT_ID, status_msg, parse_mode='Markdown')
+            logger.info("Status message sent successfully")
     except Exception as e:
-        logger.error(f"Error sending test message: {e}")
+        logger.error(f"Error sending status message: {e}")
 
 async def main():
     # Setup web app
@@ -314,16 +385,20 @@ async def main():
 
     # Test Telegram connection and send immediate test message
     await test_telegram_connection()
-    await send_test_message()
-    logger.info("Initializing scheduler...")
+    await send_status_message()
     
-    # Start initial scheduling
+    # Start the scheduler
+    scheduler.start()
+    logger.info("Scheduler started")
+    
+    # Schedule initial tasks
     await schedule_tasks()
-    logger.info("Initial tasks scheduled")
     
-    asyncio.create_task(heartbeat())
-
-    last_scheduled_date = None
+    # Start heartbeat
+    heartbeat_task = asyncio.create_task(heartbeat())
+    
+    last_scheduled_date = datetime.now(CAIRO_TZ).date()
+    
     while True:
         try:
             now = datetime.now(CAIRO_TZ)
@@ -333,22 +408,18 @@ async def main():
                 logger.info(f"Scheduling tasks for new date: {current_date}")
                 await schedule_tasks()
                 last_scheduled_date = current_date
-                
-                # Log all scheduled jobs
-                jobs = scheduler.get_jobs()
-                logger.info("Currently scheduled jobs:")
-                for job in jobs:
-                    logger.info(f"Job: {job.id} - Next run: {job.next_run_time}")
             
-            await asyncio.sleep(300)
+            # Send status message every hour
+            if now.minute == 0:
+                await send_status_message()
+            
+            await asyncio.sleep(60)  # Check every minute
         except Exception as e:
             logger.error(f"Error in main loop: {e}", exc_info=True)
             await asyncio.sleep(60)
 
 if __name__ == "__main__":
     try:
-        scheduler.start()
-        logger.info("Scheduler started")
         asyncio.run(main())
     except Exception as e:
         logger.critical(f"Critical error in main execution: {e}", exc_info=True)
