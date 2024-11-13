@@ -301,74 +301,23 @@ from aiohttp import web
 async def handle(request):
     return web.Response(text="Bot is running!")
 
-def format_time_until(target_time, now):
-    """Format time difference until target time in a human readable format"""
-    diff = target_time - now
-    hours = int(diff.total_seconds() // 3600)
-    minutes = int((diff.total_seconds() % 3600) // 60)
-    if hours > 0:
-        return f"{hours}h {minutes}m"
-    return f"{minutes}m"
-
-async def send_status_message():
-    """Send a detailed status message with schedule and countdown"""
+async def send_test_message():
+    """Send an immediate test message with current prayer times"""
     try:
         prayer_times = await fetch_prayer_times()
         if prayer_times:
             now = datetime.now(CAIRO_TZ)
-            today = now.date()
-            tomorrow = today + timedelta(days=1)
-
-            # Get all scheduled jobs
-            jobs = scheduler.get_jobs()
-            
-            # Format message with emojis and markdown
-            status_msg = "🤖 *Bot Status Report*\n"
-            status_msg += "─────────────────\n\n"
-            
-            # Current time
-            status_msg += f"📅 Date: {today.strftime('%Y-%m-%d')}\n"
-            status_msg += f"🕐 Current time: {now.strftime('%H:%M')}\n\n"
-            
-            # Prayer times
-            status_msg += "🕌 *Prayer Times Today*\n"
+            test_msg = f"🕌 Bot Test Message\n"
+            test_msg += f"Current time: {now.strftime('%H:%M')}\n\n"
+            test_msg += "Prayer times for today:\n"
             for prayer, time in prayer_times.items():
                 if prayer in ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha']:
-                    prayer_time = CAIRO_TZ.localize(datetime.strptime(f"{today} {time}", "%Y-%m-%d %H:%M"))
-                    if prayer_time < now:
-                        status_msg += f"✓ {prayer}: {time}\n"
-                    else:
-                        time_until = format_time_until(prayer_time, now)
-                        status_msg += f"⏳ {prayer}: {time} (in {time_until})\n"
+                    test_msg += f"{prayer}: {time}\n"
             
-            status_msg += "\n📋 *Today's Schedule*\n"
-            
-            # Sort jobs by next run time
-            sorted_jobs = sorted(jobs, key=lambda x: x.next_run_time)
-            
-            for job in sorted_jobs:
-                job_time = job.next_run_time
-                if job_time:
-                    time_str = job_time.strftime('%H:%M')
-                    time_until = format_time_until(job_time, now)
-                    
-                    if "morning_athkar" in job.id:
-                        status_msg += f"🌅 Morning Athkar at {time_str} (in {time_until})\n"
-                    elif "night_athkar" in job.id:
-                        status_msg += f"🌙 Evening Athkar at {time_str} (in {time_until})\n"
-                    elif "quran_pages" in job.id:
-                        next_pages = get_next_quran_pages()
-                        status_msg += f"📖 Quran Pages {next_pages[0]}-{next_pages[1]} at {time_str} (in {time_until})\n"
-            
-            status_msg += "\n⏱ *Next Status Update*\n"
-            next_hour = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
-            time_to_next = format_time_until(next_hour, now)
-            status_msg += f"Next status report in {time_to_next}\n"
-            
-            await send_message(CHAT_ID, status_msg, parse_mode='Markdown')
-            logger.info("Status message sent successfully")
+            await send_message(CHAT_ID, test_msg)
+            logger.info("Test message sent successfully")
     except Exception as e:
-        logger.error(f"Error sending status message: {e}")
+        logger.error(f"Error sending test message: {e}")
 
 async def main():
     # Setup web app
@@ -385,7 +334,7 @@ async def main():
 
     # Test Telegram connection and send immediate test message
     await test_telegram_connection()
-    await send_status_message()
+    await send_test_message()
     
     # Start the scheduler
     scheduler.start()
@@ -409,9 +358,12 @@ async def main():
                 await schedule_tasks()
                 last_scheduled_date = current_date
             
-            # Send status message every hour
+            # Log scheduler status every hour
             if now.minute == 0:
-                await send_status_message()
+                jobs = scheduler.get_jobs()
+                logger.info(f"Scheduler status - Running jobs: {len(jobs)}")
+                for job in jobs:
+                    logger.info(f"Job: {job.id} - Next run: {job.next_run_time}")
             
             await asyncio.sleep(60)  # Check every minute
         except Exception as e:
