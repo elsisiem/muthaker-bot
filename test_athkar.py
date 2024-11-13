@@ -5,9 +5,9 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime
 from pytz import timezone
 
-# Set up bot and chat details
-TOKEN = os.getenv("TELEGRAM_TOKEN")  # Replace with environment variable
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")  # Replace with environment variable
+# Set up bot and chat details from environment variables
+TOKEN = os.environ['TELEGRAM_BOT_TOKEN']
+CHAT_ID = os.environ['TELEGRAM_CHAT_ID']
 bot = telegram.Bot(token=TOKEN)
 
 # Folder paths for images

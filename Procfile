@@ -1,1 +1,1 @@
-worker: python fazkerbot.py
+web: python fazkerbot.py
