@@ -229,7 +229,7 @@ async def schedule_tasks():
             return
 
         global DAILY_TASKS
-        DAILY_TASKS.clear()  # Clear previous day's tasks
+        DAILY_TASKS.clear()
         
         now = datetime.now(CAIRO_TZ)
         today = now.date()
@@ -238,8 +238,17 @@ async def schedule_tasks():
         for prayer, time_str in prayer_times.items():
             if prayer in ['Fajr', 'Asr']:
                 prayer_time = CAIRO_TZ.localize(datetime.strptime(f"{today} {time_str}", "%Y-%m-%d %H:%M"))
+                schedule_for_tomorrow = False
                 
-                if prayer_time < now:
+                # Only schedule for tomorrow if prayer time AND its associated tasks have passed
+                if prayer == 'Fajr':
+                    task_time = prayer_time + timedelta(minutes=35)
+                    schedule_for_tomorrow = task_time < now
+                elif prayer == 'Asr':
+                    last_task_time = prayer_time + timedelta(minutes=45)  # Quran pages time
+                    schedule_for_tomorrow = last_task_time < now
+                
+                if schedule_for_tomorrow:
                     prayer_time = CAIRO_TZ.localize(datetime.strptime(f"{tomorrow} {time_str}", "%Y-%m-%d %H:%M"))
                 
                 if prayer == 'Fajr':
@@ -366,25 +375,24 @@ async def send_status_message():
             
             # Sort tasks by time
             sorted_tasks = sorted(DAILY_TASKS, key=lambda x: x['time'])
+            today_tasks = [task for task in sorted_tasks if task['time'].date() == today]
             
-            if sorted_tasks:
-                for task in sorted_tasks:
-                    task_time = task['time']
-                    if task_time.date() == today:  # Only show today's tasks
-                        time_str = task_time.strftime('%H:%M')
-                        if task_time > now:
-                            time_until = format_time_until(task_time, now)
-                            status_msg += f"⏳ {task['description']} at {time_str} (in {time_until})\n"
-                            remaining_tasks = True
-                        else:
-                            status_msg += f"✓ {task['description']} at {time_str}\n"
+            if today_tasks:
+                for task in today_tasks:
+                    time_str = task['time'].strftime('%H:%M')
+                    if task['time'] > now:
+                        time_until = format_time_until(task['time'], now)
+                        status_msg += f"⏳ {task['description']} at {time_str} (in {time_until})\n"
+                        remaining_tasks = True
+                    else:
+                        status_msg += f"✓ {task['description']} at {time_str}\n"
                 
                 if not remaining_tasks:
                     status_msg += "✨ All tasks completed for today!\n"
             else:
-                status_msg += "No tasks scheduled for today\n"
+                status_msg += "No remaining tasks for today\n"
             
-            # Show all tomorrow's events if no remaining tasks today
+            # Show tomorrow's events only if no remaining tasks today
             if not remaining_tasks:
                 status_msg += "\n📅 *Tomorrow's Events*\n"
                 # Calculate tomorrow's prayer times and events
