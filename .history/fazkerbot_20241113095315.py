@@ -219,8 +219,6 @@ async def send_quran_pages():
     finally:
         logger.info("Exiting send_quran_pages function")
 
-DAILY_TASKS = []  # Global list to store all scheduled tasks for the day
-
 async def schedule_tasks():
     try:
         prayer_times = await fetch_prayer_times()
@@ -228,8 +226,7 @@ async def schedule_tasks():
             logger.error("Failed to fetch prayer times")
             return
 
-        global DAILY_TASKS
-        DAILY_TASKS.clear()  # Clear previous day's tasks
+        logger.info(f"Fetched prayer times: {prayer_times}")
         
         now = datetime.now(CAIRO_TZ)
         today = now.date()
@@ -239,17 +236,12 @@ async def schedule_tasks():
             if prayer in ['Fajr', 'Asr']:
                 prayer_time = CAIRO_TZ.localize(datetime.strptime(f"{today} {time_str}", "%Y-%m-%d %H:%M"))
                 
+                # If prayer time has passed, schedule for tomorrow
                 if prayer_time < now:
                     prayer_time = CAIRO_TZ.localize(datetime.strptime(f"{tomorrow} {time_str}", "%Y-%m-%d %H:%M"))
                 
                 if prayer == 'Fajr':
                     athkar_time = prayer_time + timedelta(minutes=35)
-                    task = {
-                        'type': 'morning_athkar',
-                        'time': athkar_time,
-                        'description': '🌅 Morning Athkar'
-                    }
-                    DAILY_TASKS.append(task)
                     job = scheduler.add_job(
                         send_athkar,
                         trigger=DateTrigger(run_date=athkar_time, timezone=CAIRO_TZ),
@@ -258,23 +250,11 @@ async def schedule_tasks():
                         replace_existing=True,
                         misfire_grace_time=300
                     )
+                    logger.info(f"Scheduled morning Athkar for {athkar_time}, job ID: {job.id}")
                 
                 elif prayer == 'Asr':
                     athkar_time = prayer_time + timedelta(minutes=35)
                     quran_time = prayer_time + timedelta(minutes=45)
-                    next_pages = get_next_quran_pages()
-                    
-                    evening_task = {
-                        'type': 'evening_athkar',
-                        'time': athkar_time,
-                        'description': '🌙 Evening Athkar'
-                    }
-                    quran_task = {
-                        'type': 'quran',
-                        'time': quran_time,
-                        'description': f'📖 Quran Pages {next_pages[0]}-{next_pages[1]}'
-                    }
-                    DAILY_TASKS.extend([evening_task, quran_task])
                     
                     job1 = scheduler.add_job(
                         send_athkar,
@@ -370,19 +350,6 @@ async def send_status_message():
                         status_msg += f"⏳ {prayer}: {time} (in {time_until})\n"
             
             status_msg += "\n📋 *Today's Schedule*\n"
-            
-            remaining_tasks = False
-            for task in sorted(DAILY_TASKS, key=lambda x: x['time']):
-                if task['time'] > now:
-                    time_until = format_time_until(task['time'], now)
-                    status_msg += f"⏳ {task['description']} at {task['time'].strftime('%H:%M')} (in {time_until})\n"
-                    remaining_tasks = True
-                else:
-                    status_msg += f"✓ {task['description']} at {task['time'].strftime('%H:%M')}\n"
-            
-            if not remaining_tasks:
-                status_msg += "✨ All tasks completed for today!\n"
-                # Show tomorrow's schedule...
             
             # Calculate prayer-based times
             asr_time = CAIRO_TZ.localize(datetime.strptime(f"{today} {prayer_times['Asr']}", "%Y-%m-%d %H:%M"))
