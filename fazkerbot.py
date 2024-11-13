@@ -235,75 +235,83 @@ async def schedule_tasks():
         today = now.date()
         tomorrow = today + timedelta(days=1)
 
-        # Function to determine task time and if it should be scheduled for today
-        def get_task_time(prayer_time, minutes_after):
-            task_time = prayer_time + timedelta(minutes=minutes_after)
-            if task_time > now:
-                return task_time, True  # Schedule for today
-            return CAIRO_TZ.localize(datetime.strptime(f"{tomorrow} {prayer_time.strftime('%H:%M')}", "%Y-%m-%d %H:%M")) + timedelta(minutes=minutes_after), False
+        def get_prayer_time(prayer, for_tomorrow=False):
+            target_date = tomorrow if for_tomorrow else today
+            return CAIRO_TZ.localize(datetime.strptime(f"{target_date} {prayer_times[prayer]}", "%Y-%m-%d %H:%M"))
 
-        for prayer, time_str in prayer_times.items():
-            if prayer in ['Fajr', 'Asr']:
-                prayer_time = CAIRO_TZ.localize(datetime.strptime(f"{today} {time_str}", "%Y-%m-%d %H:%M"))
-                
-                if prayer == 'Fajr':
-                    athkar_time, is_today = get_task_time(prayer_time, 35)
-                    task = {
-                        'type': 'morning_athkar',
-                        'time': athkar_time,
-                        'description': '🌅 Morning Athkar'
-                    }
-                    DAILY_TASKS.append(task)
-                    job = scheduler.add_job(
-                        send_athkar,
-                        trigger=DateTrigger(run_date=athkar_time, timezone=CAIRO_TZ),
-                        args=["morning"],
-                        id=f"morning_athkar_{athkar_time.strftime('%Y%m%d')}",
-                        replace_existing=True,
-                        misfire_grace_time=300
-                    )
-                
-                elif prayer == 'Asr':
-                    athkar_time, athkar_today = get_task_time(prayer_time, 35)
-                    quran_time, quran_today = get_task_time(prayer_time, 45)
-                    next_pages = get_next_quran_pages()
-                    
-                    evening_task = {
-                        'type': 'evening_athkar',
-                        'time': athkar_time,
-                        'description': '🌙 Evening Athkar'
-                    }
-                    quran_task = {
-                        'type': 'quran',
-                        'time': quran_time,
-                        'description': f'📖 Quran Pages {next_pages[0]}-{next_pages[1]}'
-                    }
-                    DAILY_TASKS.extend([evening_task, quran_task])
-                    
-                    job1 = scheduler.add_job(
-                        send_athkar,
-                        trigger=DateTrigger(run_date=athkar_time, timezone=CAIRO_TZ),
-                        args=["night"],
-                        id=f"night_athkar_{athkar_time.strftime('%Y%m%d')}",
-                        replace_existing=True,
-                        misfire_grace_time=300
-                    )
-                    job2 = scheduler.add_job(
-                        send_quran_pages,
-                        trigger=DateTrigger(run_date=quran_time, timezone=CAIRO_TZ),
-                        args=[],
-                        id=f"quran_pages_{quran_time.strftime('%Y%m%d')}",
-                        replace_existing=True,
-                        misfire_grace_time=300
-                    )
-                    logger.info(f"Scheduled night Athkar for {athkar_time}, job ID: {job1.id}")
-                    logger.info(f"Scheduled Quran pages for {quran_time}, job ID: {job2.id}")
+        # Calculate all task times for today first
+        fajr_time = get_prayer_time('Fajr')
+        asr_time = get_prayer_time('Asr')
+        
+        morning_athkar_time = fajr_time + timedelta(minutes=35)
+        evening_athkar_time = asr_time + timedelta(minutes=35)
+        quran_time = asr_time + timedelta(minutes=45)
+        
+        # If morning athkar time has passed, schedule for tomorrow
+        if morning_athkar_time <= now:
+            morning_athkar_time = get_prayer_time('Fajr', True) + timedelta(minutes=35)
+        
+        # Add morning athkar task
+        DAILY_TASKS.append({
+            'type': 'morning_athkar',
+            'time': morning_athkar_time,
+            'description': '🌅 Morning Athkar'
+        })
+        
+        # Only move evening tasks to tomorrow if both have passed
+        if evening_athkar_time <= now and quran_time <= now:
+            evening_athkar_time = get_prayer_time('Asr', True) + timedelta(minutes=35)
+            quran_time = get_prayer_time('Asr', True) + timedelta(minutes=45)
+        
+        # Add evening tasks
+        next_pages = get_next_quran_pages()
+        DAILY_TASKS.extend([
+            {
+                'type': 'evening_athkar',
+                'time': evening_athkar_time,
+                'description': '🌙 Evening Athkar'
+            },
+            {
+                'type': 'quran',
+                'time': quran_time,
+                'description': f'📖 Quran Pages {next_pages[0]}-{next_pages[1]}'
+            }
+        ])
 
-        # Log all scheduled jobs
-        jobs = scheduler.get_jobs()
-        logger.info(f"Total scheduled jobs: {len(jobs)}")
-        for job in jobs:
-            logger.info(f"Job ID: {job.id}, Next run: {job.next_run_time}")
+        # Schedule jobs
+        for task in DAILY_TASKS:
+            if task['type'] == 'morning_athkar':
+                scheduler.add_job(
+                    send_athkar,
+                    trigger=DateTrigger(run_date=task['time'], timezone=CAIRO_TZ),
+                    args=["morning"],
+                    id=f"morning_athkar_{task['time'].strftime('%Y%m%d')}",
+                    replace_existing=True,
+                    misfire_grace_time=300
+                )
+            elif task['type'] == 'evening_athkar':
+                scheduler.add_job(
+                    send_athkar,
+                    trigger=DateTrigger(run_date=task['time'], timezone=CAIRO_TZ),
+                    args=["night"],
+                    id=f"night_athkar_{task['time'].strftime('%Y%m%d')}",
+                    replace_existing=True,
+                    misfire_grace_time=300
+                )
+            elif task['type'] == 'quran':
+                scheduler.add_job(
+                    send_quran_pages,
+                    trigger=DateTrigger(run_date=task['time'], timezone=CAIRO_TZ),
+                    args=[],
+                    id=f"quran_pages_{task['time'].strftime('%Y%m%d')}",
+                    replace_existing=True,
+                    misfire_grace_time=300
+                )
+
+        # Log scheduled jobs
+        logger.info(f"Total tasks scheduled: {len(DAILY_TASKS)}")
+        for task in sorted(DAILY_TASKS, key=lambda x: x['time']):
+            logger.info(f"Task: {task['description']} scheduled for {task['time']}")
 
     except Exception as e:
         logger.error(f"Error in schedule_tasks: {e}", exc_info=True)
