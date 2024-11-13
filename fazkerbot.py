@@ -384,13 +384,28 @@ async def send_status_message():
             else:
                 status_msg += "No tasks scheduled for today\n"
             
-            # Show tomorrow's first event only if no remaining tasks today
+            # Show all tomorrow's events if no remaining tasks today
             if not remaining_tasks:
-                status_msg += "\n📅 *Tomorrow's First Event*\n"
+                status_msg += "\n📅 *Tomorrow's Events*\n"
+                # Calculate tomorrow's prayer times and events
                 tomorrow_fajr = CAIRO_TZ.localize(datetime.strptime(f"{tomorrow} {prayer_times['Fajr']}", "%Y-%m-%d %H:%M"))
-                tomorrow_athkar = tomorrow_fajr + timedelta(minutes=35)
-                time_until = format_time_until(tomorrow_athkar, now)
-                status_msg += f"🌅 Morning Athkar at {tomorrow_athkar.strftime('%H:%M')} (in {time_until})\n"
+                tomorrow_asr = CAIRO_TZ.localize(datetime.strptime(f"{tomorrow} {prayer_times['Asr']}", "%Y-%m-%d %H:%M"))
+                
+                # Morning Athkar
+                tomorrow_morning_athkar = tomorrow_fajr + timedelta(minutes=35)
+                time_until_morning = format_time_until(tomorrow_morning_athkar, now)
+                status_msg += f"🌅 Morning Athkar at {tomorrow_morning_athkar.strftime('%H:%M')} (in {time_until_morning})\n"
+                
+                # Evening Athkar
+                tomorrow_evening_athkar = tomorrow_asr + timedelta(minutes=35)
+                time_until_evening = format_time_until(tomorrow_evening_athkar, now)
+                status_msg += f"🌙 Evening Athkar at {tomorrow_evening_athkar.strftime('%H:%M')} (in {time_until_evening})\n"
+                
+                # Quran Pages
+                tomorrow_quran_time = tomorrow_asr + timedelta(minutes=45)
+                time_until_quran = format_time_until(tomorrow_quran_time, now)
+                next_pages = get_next_quran_pages()  # Get tomorrow's pages
+                status_msg += f"📖 Quran Pages {next_pages[0]}-{next_pages[1]} at {tomorrow_quran_time.strftime('%H:%M')} (in {time_until_quran})\n"
             
             # Next status update
             status_msg += "\n⏱ *Next Status Update*\n"
