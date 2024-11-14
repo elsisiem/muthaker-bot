@@ -15,7 +15,7 @@ TOKEN = os.environ['TELEGRAM_BOT_TOKEN']
 CHAT_ID = os.environ['TELEGRAM_CHAT_ID']
 DATABASE_URL = os.environ['DATABASE_URL']
 CAIRO_TZ = pytz.timezone('Africa/Cairo')
-API_URL = "https://api.aladhan.com/v1/timingsByCity/{}"
+API_URL = "https://api.aladhan.com/v1/timingsByCity"
 API_PARAMS = {'city': 'Cairo', 'country': 'Egypt', 'method': 3}
 
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/elsisiem/muthaker-bot/master"
@@ -58,56 +58,15 @@ def setup_database():
 
 setup_database()
 
-# Add new retry constants
-MAX_RETRIES = 3
-RETRY_DELAY = 5  # seconds
-
 async def fetch_prayer_times():
-    today = datetime.now(CAIRO_TZ).strftime('%d-%m-%Y')
-    url = API_URL.format(today)
-    
-    for attempt in range(MAX_RETRIES):
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, params=API_PARAMS) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        if data and 'data' in data and 'timings' in data['data']:
-                            return data['data']['timings']
-                    logger.warning(f"Attempt {attempt + 1}: API returned status {response.status}")
-                    
-        except Exception as e:
-            logger.error(f"Attempt {attempt + 1}: Error fetching prayer times: {e}")
-        
-        if attempt < MAX_RETRIES - 1:
-            await asyncio.sleep(RETRY_DELAY)
-    
-    # If all retries failed, return fallback times
-    return get_fallback_prayer_times()
-
-def get_fallback_prayer_times():
-    """Return fallback prayer times when API is unavailable"""
-    now = datetime.now(CAIRO_TZ)
-    
-    # Approximate prayer times for Cairo
-    fallback_times = {
-        'Fajr': '04:30',
-        'Dhuhr': '11:45',
-        'Asr': '14:30',
-        'Maghrib': '17:00',
-        'Isha': '18:30'
-    }
-    
-    # Adjust times based on season (simple approximation)
-    if now.month in [4, 5, 6, 7, 8, 9]:  # Summer months
-        fallback_times.update({
-            'Fajr': '03:30',
-            'Maghrib': '19:00',
-            'Isha': '20:30'
-        })
-    
-    logger.warning("Using fallback prayer times due to API unavailability")
-    return fallback_times
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(API_URL, params=API_PARAMS) as response:
+                data = await response.json()
+                return data['data']['timings']
+    except Exception as e:
+        logger.error(f"Error fetching prayer times: {e}")
+        return None
 
 async def send_message(chat_id, text, parse_mode='HTML'):
     try:
@@ -387,16 +346,21 @@ async def send_status_message():
     """Send a detailed status message with schedule and countdown"""
     try:
         prayer_times = await fetch_prayer_times()
-        now = datetime.now(CAIRO_TZ)
-        today = now.date()
-
-        status_msg = "🤖 *Bot Status Report*\n"
-        status_msg += "─────────────────\n\n"
-        status_msg += f"📅 Date: {today.strftime('%Y-%m-%d')}\n"
-        status_msg += f"🕐 Current time: {now.strftime('%H:%M')}\n\n"
-        
         if prayer_times:
+            now = datetime.now(CAIRO_TZ)
+            today = now.date()
+
+            # Format message header
+            status_msg = "🤖 *Bot Status Report*\n"
+            status_msg += "─────────────────\n\n"
+            
+            # Current time
+            status_msg += f"📅 Date: {today.strftime('%Y-%m-%d')}\n"
+            status_msg += f"🕐 Current time: {now.strftime('%H:%M')}\n\n"
+            
+            # Prayer times
             status_msg += "🕌 *Prayer Times Today*\n"
+            
             # Process prayer times
             for prayer, time in prayer_times.items():
                 if prayer in ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha']:
@@ -406,74 +370,60 @@ async def send_status_message():
                     else:
                         time_until = format_time_until(prayer_time, now)
                         status_msg += f"⏳ {prayer}: {time} (in {time_until})\n"
-        else:
-            status_msg += "⚠️ *Prayer times temporarily unavailable*\n"
-
-        # Tasks schedule
-        status_msg += "\n📋 *Today's Schedule*\n"
-        remaining_tasks = False
-        
-        sorted_tasks = sorted(DAILY_TASKS, key=lambda x: x['time'])
-        today_tasks = [task for task in sorted_tasks if task['time'].date() == today]
-        
-        if today_tasks:
-            for task in today_tasks:
-                time_str = task['time'].strftime('%H:%M')
-                if task['time'] > now:
-                    time_until = format_time_until(task['time'], now)
-                    status_msg += f"⏳ {task['description']} at {time_str} (in {time_until})\n"
-                    remaining_tasks = True
-                else:
-                    status_msg += f"✓ {task['description']} at {time_str}\n"
-        else:
-            status_msg += "No tasks scheduled for today\n"
-        
-        # Show tomorrow's schedule if no remaining tasks
-        if not remaining_tasks:
-            status_msg += "\n📅 *Tomorrow's Events*\n"
-            # Calculate tomorrow's prayer times and events
-            tomorrow = today + timedelta(days=1)
-            tomorrow_fajr = CAIRO_TZ.localize(datetime.strptime(f"{tomorrow} {prayer_times['Fajr']}", "%Y-%m-%d %H:%M"))
-            tomorrow_asr = CAIRO_TZ.localize(datetime.strptime(f"{tomorrow} {prayer_times['Asr']}", "%Y-%m-%d %H:%M"))
             
-            # Morning Athkar
-            tomorrow_morning_athkar = tomorrow_fajr + timedelta(minutes=35)
-            time_until_morning = format_time_until(tomorrow_morning_athkar, now)
-            status_msg += f"🌅 Morning Athkar at {tomorrow_morning_athkar.strftime('%H:%M')} (in {time_until_morning})\n"
+            # Tasks schedule
+            status_msg += "\n📋 *Today's Schedule*\n"
+            remaining_tasks = False
             
-            # Evening Athkar
-            tomorrow_evening_athkar = tomorrow_asr + timedelta(minutes=35)
-            time_until_evening = format_time_until(tomorrow_evening_athkar, now)
-            status_msg += f"🌙 Evening Athkar at {tomorrow_evening_athkar.strftime('%H:%M')} (in {time_until_evening})\n"
+            sorted_tasks = sorted(DAILY_TASKS, key=lambda x: x['time'])
+            today_tasks = [task for task in sorted_tasks if task['time'].date() == today]
             
-            # Quran Pages
-            tomorrow_quran_time = tomorrow_asr + timedelta(minutes=45)
-            time_until_quran = format_time_until(tomorrow_quran_time, now)
-            next_pages = get_next_quran_pages()  # Get tomorrow's pages
-            status_msg += f"📖 Quran Pages {next_pages[0]}-{next_pages[1]} at {tomorrow_quran_time.strftime('%H:%M')} (in {time_until_quran})\n"
-        
-        # Next status update
-        status_msg += "\n⏱ *Next Status Update*\n"
-        next_hour = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
-        time_to_next = format_time_until(next_hour, now)
-        status_msg += f"Next status report in {time_to_next}\n"
-        
-        await send_message(CHAT_ID, status_msg, parse_mode='Markdown')
-        logger.info("Status message sent successfully")
+            if today_tasks:
+                for task in today_tasks:
+                    time_str = task['time'].strftime('%H:%M')
+                    if task['time'] > now:
+                        time_until = format_time_until(task['time'], now)
+                        status_msg += f"⏳ {task['description']} at {time_str} (in {time_until})\n"
+                        remaining_tasks = True
+                    else:
+                        status_msg += f"✓ {task['description']} at {time_str}\n"
+            else:
+                status_msg += "No tasks scheduled for today\n"
+            
+            # Show tomorrow's schedule if no remaining tasks
+            if not remaining_tasks:
+                status_msg += "\n📅 *Tomorrow's Events*\n"
+                # Calculate tomorrow's prayer times and events
+                tomorrow = today + timedelta(days=1)
+                tomorrow_fajr = CAIRO_TZ.localize(datetime.strptime(f"{tomorrow} {prayer_times['Fajr']}", "%Y-%m-%d %H:%M"))
+                tomorrow_asr = CAIRO_TZ.localize(datetime.strptime(f"{tomorrow} {prayer_times['Asr']}", "%Y-%m-%d %H:%M"))
+                
+                # Morning Athkar
+                tomorrow_morning_athkar = tomorrow_fajr + timedelta(minutes=35)
+                time_until_morning = format_time_until(tomorrow_morning_athkar, now)
+                status_msg += f"🌅 Morning Athkar at {tomorrow_morning_athkar.strftime('%H:%M')} (in {time_until_morning})\n"
+                
+                # Evening Athkar
+                tomorrow_evening_athkar = tomorrow_asr + timedelta(minutes=35)
+                time_until_evening = format_time_until(tomorrow_evening_athkar, now)
+                status_msg += f"🌙 Evening Athkar at {tomorrow_evening_athkar.strftime('%H:%M')} (in {time_until_evening})\n"
+                
+                # Quran Pages
+                tomorrow_quran_time = tomorrow_asr + timedelta(minutes=45)
+                time_until_quran = format_time_until(tomorrow_quran_time, now)
+                next_pages = get_next_quran_pages()  # Get tomorrow's pages
+                status_msg += f"📖 Quran Pages {next_pages[0]}-{next_pages[1]} at {tomorrow_quran_time.strftime('%H:%M')} (in {time_until_quran})\n"
+            
+            # Next status update
+            status_msg += "\n⏱ *Next Status Update*\n"
+            next_hour = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+            time_to_next = format_time_until(next_hour, now)
+            status_msg += f"Next status report in {time_to_next}\n"
+            
+            await send_message(CHAT_ID, status_msg, parse_mode='Markdown')
+            logger.info("Status message sent successfully")
     except Exception as e:
         logger.error(f"Error sending status message: {e}")
-        # Try to send a minimal status update if everything else fails
-        try:
-            minimal_msg = (
-                "🤖 *Bot Status Report*\n"
-                "─────────────────\n\n"
-                "⚠️ Limited status available\n"
-                f"📅 {datetime.now(CAIRO_TZ).strftime('%Y-%m-%d %H:%M')}\n"
-                "✅ Bot is running"
-            )
-            await send_message(CHAT_ID, minimal_msg, parse_mode='Markdown')
-        except:
-            logger.error("Failed to send even minimal status message")
 
 async def main():
     # Setup web app

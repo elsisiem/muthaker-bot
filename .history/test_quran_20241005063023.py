@@ -4,9 +4,9 @@ import asyncio
 from datetime import datetime
 import time
 
-# Set up bot and chat details from environment variables
-TOKEN = os.environ['TELEGRAM_BOT_TOKEN']
-CHAT_ID = os.environ['TELEGRAM_CHAT_ID']
+# Set up bot and chat details
+TOKEN = "7365741617:AAE_TGjBcXAt81r5Hfe4rFlci-Os0q50nPk"  # Use the actual bot token
+CHAT_ID = "-1002450375757"  # Use the actual chat ID for your private channel
 bot = telegram.Bot(token=TOKEN)
 
 # Folder path for images

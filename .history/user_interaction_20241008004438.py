@@ -4,7 +4,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, Conversati
 import requests
 
 # Constants for API
-TOKEN = os.environ['TELEGRAM_BOT_TOKEN']
+TOKEN = '7365741617:AAE_TGjBcXAt81r5Hfe4rFlci-Os0q50nPk' # Add your Telegram Bot Token here
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/elsisiem/muthaker-bot/master"
 QURAN_PAGES_URL = f"{GITHUB_RAW_URL}/%D8%A7%D9%84%D9%85%D8%B5%D8%AD%D9%81"
 PRAYER_API = "https://api.aladhan.com/v1/timingsByCity"
