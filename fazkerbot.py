@@ -92,33 +92,52 @@ async def delete_message(chat_id, message_id):
     except Exception as e:
         logger.error(f"Error deleting message: {e}")
 
+# Add new constant for tracking last athkar message
+ATHKAR_FILE = 'last_athkar.json'
+
+def save_last_athkar(message_id):
+    try:
+        with open(ATHKAR_FILE, 'w') as f:
+            json.dump({'last_message_id': message_id}, f)
+    except Exception as e:
+        logger.error(f"Error saving last athkar message ID: {e}")
+
+def get_last_athkar():
+    try:
+        if os.path.exists(ATHKAR_FILE):
+            with open(ATHKAR_FILE, 'r') as f:
+                data = json.load(f)
+                return data.get('last_message_id')
+    except Exception as e:
+        logger.error(f"Error loading last athkar message ID: {e}")
+    return None
+
 async def send_athkar(athkar_type):
     logger.info(f"Sending {athkar_type} Athkar")
     caption = "#أذكار_الصباح" if athkar_type == "morning" else "#أذكار_المساء"
     image_url = f"{ATHKAR_URL}/{'أذكار_الصباح' if athkar_type == 'morning' else 'أذكار_المساء'}.jpg"
     
-    message_id = await send_photo(CHAT_ID, image_url, caption)
-    
-    if message_id:
-        conn = get_db_connection()
-        try:
-            with conn.cursor() as cur:
-                # Delete previous Athkar message of the same type
-                cur.execute('SELECT message_id FROM messages WHERE message_type = %s', (athkar_type,))
-                old_message = cur.fetchone()
-                if old_message:
-                    await delete_message(CHAT_ID, old_message[0])
-                    cur.execute('DELETE FROM messages WHERE message_id = %s', (old_message[0],))
-                # Insert new Athkar message
-                cur.execute('INSERT INTO messages (message_id, message_type) VALUES (%s, %s)', (message_id, athkar_type))
-                conn.commit()
-        except Exception as e:
-            logger.error(f"Error managing Athkar messages in database: {e}")
-            conn.rollback()
-        finally:
-            release_db_connection(conn)
-    else:
-        logger.error("Failed to send Athkar message")
+    try:
+        # First try to delete the previous athkar message
+        last_message_id = get_last_athkar()
+        if last_message_id:
+            try:
+                await delete_message(CHAT_ID, last_message_id)
+                logger.info(f"Successfully deleted previous athkar message: {last_message_id}")
+            except Exception as e:
+                logger.error(f"Error deleting previous athkar message: {e}")
+
+        # Send new athkar message
+        message = await bot.send_photo(chat_id=CHAT_ID, photo=image_url, caption=caption)
+        if message:
+            # Save the new message ID
+            save_last_athkar(message.message_id)
+            logger.info(f"Successfully sent and saved new athkar message: {message.message_id}")
+        else:
+            logger.error("Failed to send athkar message")
+
+    except Exception as e:
+        logger.error(f"Error in send_athkar: {e}")
 
 def get_next_quran_pages():
     logger.info("Getting next Quran pages")
