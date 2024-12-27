@@ -5,15 +5,13 @@ from datetime import datetime, timedelta
 import asyncio
 import aiohttp
 from telegram import Bot, InputMediaPhoto
-from psycopg2 import pool
-from psycopg2.extras import DictCursor
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.date import DateTrigger
+import json
 
 # Constants - all sensitive information from environment variables
 TOKEN = os.environ['TELEGRAM_BOT_TOKEN']
 CHAT_ID = os.environ['TELEGRAM_CHAT_ID']
-DATABASE_URL = os.environ['DATABASE_URL']
 CAIRO_TZ = pytz.timezone('Africa/Cairo')
 API_URL = "https://api.aladhan.com/v1/timingsByCity"
 API_PARAMS = {'city': 'Cairo', 'country': 'Egypt', 'method': 3}
@@ -30,38 +28,26 @@ logger = logging.getLogger(__name__)
 bot = Bot(TOKEN)
 scheduler = AsyncIOScheduler(timezone=CAIRO_TZ)
 
-# Database setup with connection pooling
-min_connections = 1
-max_connections = 10
-connection_pool = pool.SimpleConnectionPool(min_connections, max_connections, DATABASE_URL, sslmode='require')
+# Replace database functions with file-based storage
+PAGES_FILE = 'quran_progress.json'
 
-def get_db_connection():
-    return connection_pool.getconn()
-
-def release_db_connection(conn):
-    connection_pool.putconn(conn)
-
-def setup_database():
-    conn = get_db_connection()
+def load_quran_progress():
     try:
-        with conn.cursor() as cur:
-            cur.execute('''CREATE TABLE IF NOT EXISTS messages
-                          (id SERIAL PRIMARY KEY, message_id INTEGER, message_type TEXT)''')
-            cur.execute('''CREATE TABLE IF NOT EXISTS quran_progress
-                          (id SERIAL PRIMARY KEY, last_page INTEGER)''')
-            # Initialize last_page to 285 to start from pages 286 and 287
-            cur.execute('''
-                INSERT INTO quran_progress (id, last_page) VALUES (1, %s)
-                ON CONFLICT (id) DO UPDATE SET last_page = EXCLUDED.last_page
-            ''', (285,))
-            conn.commit()
+        if os.path.exists(PAGES_FILE):
+            with open(PAGES_FILE, 'r') as f:
+                data = json.load(f)
+                return data.get('last_page', 367)  # Default to 367 to start with 368
+        return 367  # Default to 367 to start with 368
     except Exception as e:
-        logger.error(f"Error setting up database: {e}")
-        conn.rollback()
-    finally:
-        release_db_connection(conn)
+        logger.error(f"Error loading quran progress: {e}")
+        return 367  # Default to 367 to start with 368
 
-setup_database()
+def save_quran_progress(last_page):
+    try:
+        with open(PAGES_FILE, 'w') as f:
+            json.dump({'last_page': last_page}, f)
+    except Exception as e:
+        logger.error(f"Error saving quran progress: {e}")
 
 async def fetch_prayer_times():
     try:
@@ -135,29 +121,20 @@ async def send_athkar(athkar_type):
         logger.error("Failed to send Athkar message")
 
 def get_next_quran_pages():
-    logger.info("Entering get_next_quran_pages function")
-    conn = get_db_connection()
-    try:
-        with conn.cursor(cursor_factory=DictCursor) as cur:
-            cur.execute('SELECT last_page FROM quran_progress WHERE id = 1')
-            result = cur.fetchone()
-            logger.debug(f"Database query result: {result}")
-            if result and result['last_page'] is not None:
-                current_page = result['last_page']
-                next_page = current_page + 1 if current_page < 604 else 220
-                following_page = next_page + 1 if next_page < 604 else 220
-            else:
-                logger.info("No valid entry in database, starting from page 220")
-                next_page = 220
-                following_page = 221
-            logger.info(f"Next Quran pages: {next_page} and {following_page}")
-            return next_page, following_page
-    except Exception as e:
-        logger.error(f"Error getting next Quran pages: {e}")
-        return 220, 221  # Return default values in case of error
-    finally:
-        release_db_connection(conn)
-        logger.info("Exiting get_next_quran_pages function")
+    logger.info("Getting next Quran pages")
+    current_page = load_quran_progress()
+    next_page = current_page + 1
+    following_page = next_page + 1
+    
+    # Reset to page 1 if we reach the end
+    if next_page > 604:
+        next_page = 1
+        following_page = 2
+    elif following_page > 604:
+        following_page = 1
+        
+    logger.info(f"Next Quran pages: {next_page} and {following_page}")
+    return next_page, following_page
 
 async def send_quran_pages():
     logger.info("Entering send_quran_pages function")
@@ -172,13 +149,11 @@ async def send_quran_pages():
         for url in [page_1_url, page_2_url]:
             try:
                 async with session.get(url) as response:
-                    logger.info(f"GET request for {url}: status {response.status}")
                     if response.status != 200:
                         logger.error(f"Image not found: {url}")
                         return
-                    # Read a small part of the response to ensure it's an image
                     content = await response.content.read(10)
-                    if not content.startswith(b'\xff\xd8'):  # JPEG file signature
+                    if not content.startswith(b'\xff\xd8'):
                         logger.error(f"URL does not point to a valid JPEG image: {url}")
                         return
             except Exception as e:
@@ -196,21 +171,8 @@ async def send_quran_pages():
         
         if message_ids:
             logger.info(f"Successfully sent media group. Message IDs: {message_ids}")
-            conn = get_db_connection()
-            try:
-                with conn.cursor() as cur:
-                    # Update last_page after sending pages
-                    cur.execute('UPDATE quran_progress SET last_page = %s WHERE id = 1', (page2,))
-                    # Insert new message IDs into the database
-                    for message_id in message_ids:
-                        cur.execute('INSERT INTO messages (message_id, message_type) VALUES (%s, %s)', (message_id, "quran"))
-                    conn.commit()
-                logger.info("Successfully updated database with new message IDs")
-            except Exception as e:
-                logger.error(f"Error managing Quran messages in database: {e}")
-                conn.rollback()
-            finally:
-                release_db_connection(conn)
+            # Save the last page after successful sending
+            save_quran_progress(page2)
         else:
             logger.error("Failed to send Quran pages: No message IDs returned")
     except Exception as e:
@@ -437,9 +399,9 @@ async def main():
     await site.start()
     logger.info(f"Web server started on port {port}")
 
-    # Test Telegram connection and send immediate test message
+    # Test Telegram connection and send initial status message
     await test_telegram_connection()
-    await send_status_message()
+    await send_status_message()  # Only send status once at startup
     
     # Start the scheduler
     scheduler.start()
@@ -462,10 +424,6 @@ async def main():
                 logger.info(f"Scheduling tasks for new date: {current_date}")
                 await schedule_tasks()
                 last_scheduled_date = current_date
-
-            # Removed the hourly status report
-            # if now.minute == 0:
-            #     await send_status_message()
 
             await asyncio.sleep(60)  # Check every minute
         except Exception as e:
