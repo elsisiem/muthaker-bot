@@ -8,6 +8,10 @@ from telegram import Bot, InputMediaPhoto
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.date import DateTrigger
 import json
+import psutil
+import functools
+from typing import Optional, Any
+import traceback
 
 # Constants - all sensitive information from environment variables
 TOKEN = os.environ['TELEGRAM_BOT_TOKEN']
@@ -28,27 +32,28 @@ logger = logging.getLogger(__name__)
 bot = Bot(TOKEN)
 scheduler = AsyncIOScheduler(timezone=CAIRO_TZ)
 
-# Replace database functions with file-based storage
-PAGES_FILE = 'quran_progress.json'
+# Add retry decorator
+def retry_with_backoff(retries=3, backoff_in_seconds=1):
+    def decorator(func):
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            retry_count = 0
+            while retry_count < retries:
+                try:
+                    return await func(*args, **kwargs)
+                except Exception as e:
+                    retry_count += 1
+                    if retry_count == retries:
+                        logger.error(f"Final retry failed for {func.__name__}: {e}")
+                        raise
+                    wait_time = backoff_in_seconds * (2 ** (retry_count - 1))
+                    logger.warning(f"Retry {retry_count} for {func.__name__} after {wait_time}s. Error: {e}")
+                    await asyncio.sleep(wait_time)
+            return None
+        return wrapper
+    return decorator
 
-def load_quran_progress():
-    try:
-        if os.path.exists(PAGES_FILE):
-            with open(PAGES_FILE, 'r') as f:
-                data = json.load(f)
-                return data.get('last_page', 367)  # Default to 367 to start with 368
-        return 367  # Default to 367 to start with 368
-    except Exception as e:
-        logger.error(f"Error loading quran progress: {e}")
-        return 367  # Default to 367 to start with 368
-
-def save_quran_progress(last_page):
-    try:
-        with open(PAGES_FILE, 'w') as f:
-            json.dump({'last_page': last_page}, f)
-    except Exception as e:
-        logger.error(f"Error saving quran progress: {e}")
-
+@retry_with_backoff()
 async def fetch_prayer_times():
     try:
         async with aiohttp.ClientSession() as session:
@@ -75,6 +80,7 @@ async def send_photo(chat_id, photo_url, caption=None):
         logger.error(f"Error sending photo: {e}")
         return None
 
+@retry_with_backoff()
 async def send_media_group(chat_id, media):
     try:
         logger.info(f"Sending media group to chat {chat_id}")
@@ -92,47 +98,53 @@ async def delete_message(chat_id, message_id):
     except Exception as e:
         logger.error(f"Error deleting message: {e}")
 
-# Add new constant for tracking last athkar message
-ATHKAR_FILE = 'last_athkar.json'
-
-def save_last_athkar(message_id):
+async def find_previous_athkar(chat_id):
+    """Find the previous athkar message by searching recent messages"""
     try:
-        with open(ATHKAR_FILE, 'w') as f:
-            json.dump({'last_message_id': message_id}, f)
+        messages = await bot.get_updates()
+        for update in messages:
+            if (update.channel_post and 
+                update.channel_post.chat.id == int(chat_id) and
+                update.channel_post.caption and
+                ("#أذكار_الصباح" in update.channel_post.caption or 
+                 "#أذكار_المساء" in update.channel_post.caption)):
+                return update.channel_post.message_id
     except Exception as e:
-        logger.error(f"Error saving last athkar message ID: {e}")
-
-def get_last_athkar():
-    try:
-        if os.path.exists(ATHKAR_FILE):
-            with open(ATHKAR_FILE, 'r') as f:
-                data = json.load(f)
-                return data.get('last_message_id')
-    except Exception as e:
-        logger.error(f"Error loading last athkar message ID: {e}")
+        logger.error(f"Error finding previous athkar: {e}")
     return None
 
 async def send_athkar(athkar_type):
+    """Send athkar with improved cleanup based on message timestamps"""
     logger.info(f"Sending {athkar_type} Athkar")
+    
     caption = "#أذكار_الصباح" if athkar_type == "morning" else "#أذكار_المساء"
     image_url = f"{ATHKAR_URL}/{'أذكار_الصباح' if athkar_type == 'morning' else 'أذكار_المساء'}.jpg"
     
     try:
-        # First try to delete the previous athkar message
-        last_message_id = get_last_athkar()
-        if last_message_id:
+        # Get channel history and find the most recent athkar message
+        found_messages = []
+        async for message in bot.get_chat_history(chat_id=CHAT_ID, limit=50):
+            if (message.caption and 
+                ("#أذكار_الصباح" in message.caption or "#أذكار_المساء" in message.caption)):
+                found_messages.append(message)
+                if len(found_messages) >= 2:  # We only need to track the last 2 messages
+                    break
+        
+        # Sort messages by date, newest first
+        found_messages.sort(key=lambda x: x.date, reverse=True)
+        
+        # If we found any messages, delete the older one
+        if len(found_messages) >= 2:
             try:
-                await delete_message(CHAT_ID, last_message_id)
-                logger.info(f"Successfully deleted previous athkar message: {last_message_id}")
+                await bot.delete_message(chat_id=CHAT_ID, message_id=found_messages[1].message_id)
+                logger.info(f"Deleted older athkar message: {found_messages[1].message_id}")
             except Exception as e:
-                logger.error(f"Error deleting previous athkar message: {e}")
+                logger.error(f"Error deleting older athkar message: {e}")
 
         # Send new athkar message
         message = await bot.send_photo(chat_id=CHAT_ID, photo=image_url, caption=caption)
         if message:
-            # Save the new message ID
-            save_last_athkar(message.message_id)
-            logger.info(f"Successfully sent and saved new athkar message: {message.message_id}")
+            logger.info(f"Successfully sent new athkar message: {message.message_id}")
         else:
             logger.error("Failed to send athkar message")
 
@@ -140,20 +152,48 @@ async def send_athkar(athkar_type):
         logger.error(f"Error in send_athkar: {e}")
 
 def get_next_quran_pages():
-    logger.info("Getting next Quran pages")
-    current_page = load_quran_progress()
-    next_page = current_page + 1
-    following_page = next_page + 1
+    logger.info("Calculating Quran pages based on date")
     
-    # Reset to page 1 if we reach the end
+    # Set reference date and starting page
+    reference_date = datetime(2024, 1, 29).date()  # Your specified start date
+    start_page = 432  # Your specified start page
+    
+    # Get current date
+    current_date = datetime.now(CAIRO_TZ).date()
+    
+    # Calculate days since reference date
+    days_passed = (current_date - reference_date).days
+    
+    # Calculate current page (2 pages per day)
+    current_page = start_page + (days_passed * 2)
+    
+    # Handle wrapping around when reaching end of Quran (604 pages)
+    current_page = ((current_page - 1) % 604) + 1
+    next_page = current_page + 1
+    
+    # If next page would exceed 604, wrap to page 1
     if next_page > 604:
         next_page = 1
-        following_page = 2
-    elif following_page > 604:
-        following_page = 1
         
-    logger.info(f"Next Quran pages: {next_page} and {following_page}")
-    return next_page, following_page
+    logger.info(f"Calculated Quran pages: {current_page} and {next_page}")
+    return current_page, next_page
+
+async def verify_image_url(url: str) -> bool:
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status != 200:
+                    return False
+                
+                # Read first few bytes to check if it's an image
+                content = await response.content.read(32)
+                return (content.startswith(b'\xff\xd8\xff') or  # JPEG
+                        content.startswith(b'\x89PNG\r\n\x1a\n') or  # PNG
+                        content.startswith(b'GIF87a') or  # GIF
+                        content.startswith(b'GIF89a'))  # GIF
+    except Exception as e:
+        logger.error(f"Error verifying image {url}: {e}")
+        return False
 
 async def send_quran_pages():
     logger.info("Entering send_quran_pages function")
@@ -163,21 +203,10 @@ async def send_quran_pages():
     
     logger.info(f"Quran page URLs: {page_1_url}, {page_2_url}")
     
-    # Verify that the images exist
-    async with aiohttp.ClientSession() as session:
-        for url in [page_1_url, page_2_url]:
-            try:
-                async with session.get(url) as response:
-                    if response.status != 200:
-                        logger.error(f"Image not found: {url}")
-                        return
-                    content = await response.content.read(10)
-                    if not content.startswith(b'\xff\xd8'):
-                        logger.error(f"URL does not point to a valid JPEG image: {url}")
-                        return
-            except Exception as e:
-                logger.error(f"Error checking image URL {url}: {e}")
-                return
+    # Verify images using new function
+    if not all(await verify_image_url(url) for url in [page_1_url, page_2_url]):
+        logger.error("Failed to verify Quran page images")
+        return
     
     media = [
         {"type": "photo", "media": page_1_url},
@@ -190,8 +219,6 @@ async def send_quran_pages():
         
         if message_ids:
             logger.info(f"Successfully sent media group. Message IDs: {message_ids}")
-            # Save the last page after successful sending
-            save_quran_progress(page2)
         else:
             logger.error("Failed to send Quran pages: No message IDs returned")
     except Exception as e:
@@ -311,7 +338,27 @@ async def heartbeat():
 from aiohttp import web
 
 async def handle(request):
-    return web.Response(text="Bot is running!")
+    try:
+        # Get process info
+        process = psutil.Process()
+        memory_info = process.memory_info()
+        
+        # Get scheduler info
+        jobs = scheduler.get_jobs()
+        next_job = min(jobs, key=lambda x: x.next_run_time) if jobs else None
+        
+        health_data = {
+            "status": "running",
+            "uptime": process.create_time(),
+            "memory_usage_mb": memory_info.rss / 1024 / 1024,
+            "next_scheduled_task": str(next_job.next_run_time) if next_job else None,
+            "total_scheduled_tasks": len(jobs),
+            "last_error": None
+        }
+        
+        return web.json_response(health_data)
+    except Exception as e:
+        return web.json_response({"status": "error", "error": str(e)}, status=500)
 
 def format_time_until(target_time, now):
     """Format time difference until target time in a human readable format"""
@@ -322,88 +369,44 @@ def format_time_until(target_time, now):
         return f"{hours}h {minutes}m"
     return f"{minutes}m"
 
-async def send_status_message():
-    """Send a detailed status message with schedule and countdown"""
+async def log_status_message():
+    """Log status message without sending to channel"""
     try:
         prayer_times = await fetch_prayer_times()
         if prayer_times:
             now = datetime.now(CAIRO_TZ)
             today = now.date()
-
-            # Format message header
-            status_msg = "🤖 *Bot Status Report*\n"
-            status_msg += "─────────────────\n\n"
             
-            # Current time
-            status_msg += f"📅 Date: {today.strftime('%Y-%m-%d')}\n"
-            status_msg += f"🕐 Current time: {now.strftime('%H:%M')}\n\n"
+            # Create status message for logs only
+            status_msg = f"Bot Status Report - {today.strftime('%Y-%m-%d')} {now.strftime('%H:%M')}\n"
+            status_msg += "Prayer times today:\n"
             
-            # Prayer times
-            status_msg += "🕌 *Prayer Times Today*\n"
-            
-            # Process prayer times
             for prayer, time in prayer_times.items():
                 if prayer in ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha']:
-                    prayer_time = CAIRO_TZ.localize(datetime.strptime(f"{today} {time}", "%Y-%m-%d %H:%M"))
-                    if prayer_time < now:
-                        status_msg += f"✓ {prayer}: {time}\n"
-                    else:
-                        time_until = format_time_until(prayer_time, now)
-                        status_msg += f"⏳ {prayer}: {time} (in {time_until})\n"
+                    status_msg += f"- {prayer}: {time}\n"
             
-            # Tasks schedule
-            status_msg += "\n📋 *Today's Schedule*\n"
-            remaining_tasks = False
+            status_msg += "\nScheduled tasks:\n"
+            for task in sorted(DAILY_TASKS, key=lambda x: x['time']):
+                status_msg += f"- {task['description']} at {task['time'].strftime('%H:%M')}\n"
             
-            sorted_tasks = sorted(DAILY_TASKS, key=lambda x: x['time'])
-            today_tasks = [task for task in sorted_tasks if task['time'].date() == today]
-            
-            if today_tasks:
-                for task in today_tasks:
-                    time_str = task['time'].strftime('%H:%M')
-                    if task['time'] > now:
-                        time_until = format_time_until(task['time'], now)
-                        status_msg += f"⏳ {task['description']} at {time_str} (in {time_until})\n"
-                        remaining_tasks = True
-                    else:
-                        status_msg += f"✓ {task['description']} at {time_str}\n"
-            else:
-                status_msg += "No tasks scheduled for today\n"
-            
-            # Show tomorrow's schedule if no remaining tasks
-            if not remaining_tasks:
-                status_msg += "\n📅 *Tomorrow's Events*\n"
-                # Calculate tomorrow's prayer times and events
-                tomorrow = today + timedelta(days=1)
-                tomorrow_fajr = CAIRO_TZ.localize(datetime.strptime(f"{tomorrow} {prayer_times['Fajr']}", "%Y-%m-%d %H:%M"))
-                tomorrow_asr = CAIRO_TZ.localize(datetime.strptime(f"{tomorrow} {prayer_times['Asr']}", "%Y-%m-%d %H:%M"))
-                
-                # Morning Athkar
-                tomorrow_morning_athkar = tomorrow_fajr + timedelta(minutes=35)
-                time_until_morning = format_time_until(tomorrow_morning_athkar, now)
-                status_msg += f"🌅 Morning Athkar at {tomorrow_morning_athkar.strftime('%H:%M')} (in {time_until_morning})\n"
-                
-                # Evening Athkar
-                tomorrow_evening_athkar = tomorrow_asr + timedelta(minutes=35)
-                time_until_evening = format_time_until(tomorrow_evening_athkar, now)
-                status_msg += f"🌙 Evening Athkar at {tomorrow_evening_athkar.strftime('%H:%M')} (in {time_until_evening})\n"
-                
-                # Quran Pages
-                tomorrow_quran_time = tomorrow_asr + timedelta(minutes=45)
-                time_until_quran = format_time_until(tomorrow_quran_time, now)
-                next_pages = get_next_quran_pages()  # Get tomorrow's pages
-                status_msg += f"📖 Quran Pages {next_pages[0]}-{next_pages[1]} at {tomorrow_quran_time.strftime('%H:%M')} (in {time_until_quran})\n"
-            
-            # Next status update
-            status_msg += "\n⏱ *Next Status Update*\n"
-            next_hour = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
-            time_to_next = format_time_until(next_hour, now)
-            status_msg += f"Next status report in {time_to_next}\n"
-            
-            await send_message(CHAT_ID, status_msg, parse_mode='Markdown')
-            logger.info("Status message sent successfully")
+            logger.info(status_msg)
     except Exception as e:
-        logger.error(f"Error sending status message: {e}")
+        logger.error(f"Error creating status log: {e}")
+
+async def shutdown(app):
+    logger.info("Initiating graceful shutdown...")
+    
+    # Cancel all pending tasks
+    for task in asyncio.all_tasks():
+        if task is not asyncio.current_task():
+            task.cancel()
+    
+    # Wait for tasks to complete
+    await asyncio.gather(*asyncio.all_tasks(), return_exceptions=True)
+    
+    # Shutdown scheduler
+    scheduler.shutdown()
+    logger.info("Graceful shutdown completed")
 
 async def main():
     # Setup web app
@@ -418,9 +421,9 @@ async def main():
     await site.start()
     logger.info(f"Web server started on port {port}")
 
-    # Test Telegram connection and send initial status message
+    # Test Telegram connection and log initial status
     await test_telegram_connection()
-    await send_status_message()  # Only send status once at startup
+    await log_status_message()  # Log status without sending to channel
     
     # Start the scheduler
     scheduler.start()
@@ -432,6 +435,19 @@ async def main():
     # Start heartbeat
     heartbeat_task = asyncio.create_task(heartbeat())
     
+    # Add shutdown handler
+    app.on_shutdown.append(shutdown)
+    
+    # Add periodic memory usage logging
+    async def log_memory_usage():
+        while True:
+            process = psutil.Process()
+            memory_info = process.memory_info()
+            logger.info(f"Memory usage: {memory_info.rss / 1024 / 1024:.2f} MB")
+            await asyncio.sleep(300)  # Every 5 minutes
+    
+    memory_task = asyncio.create_task(log_memory_usage())
+    
     last_scheduled_date = datetime.now(CAIRO_TZ).date()
     
     while True:
@@ -442,9 +458,10 @@ async def main():
             if last_scheduled_date != current_date:
                 logger.info(f"Scheduling tasks for new date: {current_date}")
                 await schedule_tasks()
+                await log_status_message()  # Log daily status
                 last_scheduled_date = current_date
 
-            await asyncio.sleep(60)  # Check every minute
+            await asyncio.sleep(60)
         except Exception as e:
             logger.error(f"Error in main loop: {e}", exc_info=True)
             await asyncio.sleep(60)
