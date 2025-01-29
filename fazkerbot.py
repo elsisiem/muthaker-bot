@@ -8,10 +8,6 @@ from telegram import Bot, InputMediaPhoto
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.date import DateTrigger
 import json
-import psutil
-import functools
-from typing import Optional, Any
-import traceback
 
 # Constants - all sensitive information from environment variables
 TOKEN = os.environ['TELEGRAM_BOT_TOKEN']
@@ -32,28 +28,6 @@ logger = logging.getLogger(__name__)
 bot = Bot(TOKEN)
 scheduler = AsyncIOScheduler(timezone=CAIRO_TZ)
 
-# Add retry decorator
-def retry_with_backoff(retries=3, backoff_in_seconds=1):
-    def decorator(func):
-        @functools.wraps(func)
-        async def wrapper(*args, **kwargs):
-            retry_count = 0
-            while retry_count < retries:
-                try:
-                    return await func(*args, **kwargs)
-                except Exception as e:
-                    retry_count += 1
-                    if retry_count == retries:
-                        logger.error(f"Final retry failed for {func.__name__}: {e}")
-                        raise
-                    wait_time = backoff_in_seconds * (2 ** (retry_count - 1))
-                    logger.warning(f"Retry {retry_count} for {func.__name__} after {wait_time}s. Error: {e}")
-                    await asyncio.sleep(wait_time)
-            return None
-        return wrapper
-    return decorator
-
-@retry_with_backoff()
 async def fetch_prayer_times():
     try:
         async with aiohttp.ClientSession() as session:
@@ -80,7 +54,6 @@ async def send_photo(chat_id, photo_url, caption=None):
         logger.error(f"Error sending photo: {e}")
         return None
 
-@retry_with_backoff()
 async def send_media_group(chat_id, media):
     try:
         logger.info(f"Sending media group to chat {chat_id}")
@@ -178,23 +151,6 @@ def get_next_quran_pages():
     logger.info(f"Calculated Quran pages: {current_page} and {next_page}")
     return current_page, next_page
 
-async def verify_image_url(url: str) -> bool:
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as response:
-                if response.status != 200:
-                    return False
-                
-                # Read first few bytes to check if it's an image
-                content = await response.content.read(32)
-                return (content.startswith(b'\xff\xd8\xff') or  # JPEG
-                        content.startswith(b'\x89PNG\r\n\x1a\n') or  # PNG
-                        content.startswith(b'GIF87a') or  # GIF
-                        content.startswith(b'GIF89a'))  # GIF
-    except Exception as e:
-        logger.error(f"Error verifying image {url}: {e}")
-        return False
-
 async def send_quran_pages():
     logger.info("Entering send_quran_pages function")
     page1, page2 = get_next_quran_pages()
@@ -203,10 +159,21 @@ async def send_quran_pages():
     
     logger.info(f"Quran page URLs: {page_1_url}, {page_2_url}")
     
-    # Verify images using new function
-    if not all(await verify_image_url(url) for url in [page_1_url, page_2_url]):
-        logger.error("Failed to verify Quran page images")
-        return
+    # Verify that the images exist
+    async with aiohttp.ClientSession() as session:
+        for url in [page_1_url, page_2_url]:
+            try:
+                async with session.get(url) as response:
+                    if response.status != 200:
+                        logger.error(f"Image not found: {url}")
+                        return
+                    content = await response.content.read(10)
+                    if not content.startswith(b'\xff\xd8'):
+                        logger.error(f"URL does not point to a valid JPEG image: {url}")
+                        return
+            except Exception as e:
+                logger.error(f"Error checking image URL {url}: {e}")
+                return
     
     media = [
         {"type": "photo", "media": page_1_url},
@@ -338,27 +305,7 @@ async def heartbeat():
 from aiohttp import web
 
 async def handle(request):
-    try:
-        # Get process info
-        process = psutil.Process()
-        memory_info = process.memory_info()
-        
-        # Get scheduler info
-        jobs = scheduler.get_jobs()
-        next_job = min(jobs, key=lambda x: x.next_run_time) if jobs else None
-        
-        health_data = {
-            "status": "running",
-            "uptime": process.create_time(),
-            "memory_usage_mb": memory_info.rss / 1024 / 1024,
-            "next_scheduled_task": str(next_job.next_run_time) if next_job else None,
-            "total_scheduled_tasks": len(jobs),
-            "last_error": None
-        }
-        
-        return web.json_response(health_data)
-    except Exception as e:
-        return web.json_response({"status": "error", "error": str(e)}, status=500)
+    return web.Response(text="Bot is running!")
 
 def format_time_until(target_time, now):
     """Format time difference until target time in a human readable format"""
@@ -393,21 +340,6 @@ async def log_status_message():
     except Exception as e:
         logger.error(f"Error creating status log: {e}")
 
-async def shutdown(app):
-    logger.info("Initiating graceful shutdown...")
-    
-    # Cancel all pending tasks
-    for task in asyncio.all_tasks():
-        if task is not asyncio.current_task():
-            task.cancel()
-    
-    # Wait for tasks to complete
-    await asyncio.gather(*asyncio.all_tasks(), return_exceptions=True)
-    
-    # Shutdown scheduler
-    scheduler.shutdown()
-    logger.info("Graceful shutdown completed")
-
 async def main():
     # Setup web app
     app = web.Application()
@@ -434,19 +366,6 @@ async def main():
     
     # Start heartbeat
     heartbeat_task = asyncio.create_task(heartbeat())
-    
-    # Add shutdown handler
-    app.on_shutdown.append(shutdown)
-    
-    # Add periodic memory usage logging
-    async def log_memory_usage():
-        while True:
-            process = psutil.Process()
-            memory_info = process.memory_info()
-            logger.info(f"Memory usage: {memory_info.rss / 1024 / 1024:.2f} MB")
-            await asyncio.sleep(300)  # Every 5 minutes
-    
-    memory_task = asyncio.create_task(log_memory_usage())
     
     last_scheduled_date = datetime.now(CAIRO_TZ).date()
     
