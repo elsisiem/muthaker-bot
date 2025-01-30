@@ -94,25 +94,17 @@ async def send_athkar(athkar_type):
     image_url = f"{ATHKAR_URL}/{'أذكار_الصباح' if athkar_type == 'morning' else 'أذكار_المساء'}.jpg"
     
     try:
-        # Get channel history and find the most recent athkar message
-        found_messages = []
-        async for message in bot.get_chat_history(chat_id=CHAT_ID, limit=50):
-            if (message.caption and 
-                ("#أذكار_الصباح" in message.caption or "#أذكار_المساء" in message.caption)):
-                found_messages.append(message)
-                if len(found_messages) >= 2:  # We only need to track the last 2 messages
-                    break
-        
-        # Sort messages by date, newest first
-        found_messages.sort(key=lambda x: x.date, reverse=True)
-        
-        # If we found any messages, delete the older one
-        if len(found_messages) >= 2:
-            try:
-                await bot.delete_message(chat_id=CHAT_ID, message_id=found_messages[1].message_id)
-                logger.info(f"Deleted older athkar message: {found_messages[1].message_id}")
-            except Exception as e:
-                logger.error(f"Error deleting older athkar message: {e}")
+        # Simplified message deletion logic
+        messages = await bot.get_chat_messages(chat_id=CHAT_ID, limit=20)
+        for msg in messages:
+            if (hasattr(msg, 'caption') and msg.caption and 
+                ("#أذكار_الصباح" in msg.caption or "#أذكار_المساء" in msg.caption)):
+                try:
+                    await bot.delete_message(chat_id=CHAT_ID, message_id=msg.message_id)
+                    logger.info(f"Deleted previous athkar message: {msg.message_id}")
+                except Exception as e:
+                    logger.error(f"Error deleting message {msg.message_id}: {e}")
+                break  # Only delete the most recent one
 
         # Send new athkar message
         message = await bot.send_photo(chat_id=CHAT_ID, photo=image_url, caption=caption)
@@ -128,27 +120,35 @@ def get_next_quran_pages():
     logger.info("Calculating Quran pages based on date")
     
     # Set reference date and starting page
-    reference_date = datetime(2024, 1, 29).date()  # Your specified start date
-    start_page = 432  # Your specified start page
+    reference_date = datetime(2024, 1, 31).date()
+    start_page = 436
     
     # Get current date
     current_date = datetime.now(CAIRO_TZ).date()
     
     # Calculate days since reference date
     days_passed = (current_date - reference_date).days
+    logger.debug(f"Days passed since reference: {days_passed}")
     
-    # Calculate current page (2 pages per day)
-    current_page = start_page + (days_passed * 2)
+    # Calculate base page number
+    base_page = start_page + (days_passed * 2)
+    logger.debug(f"Base page before modulo: {base_page}")
     
-    # Handle wrapping around when reaching end of Quran (604 pages)
-    current_page = ((current_page - 1) % 604) + 1
-    next_page = current_page + 1
+    # Apply modulo to get current page within Quran bounds
+    current_page = ((base_page - 1) % 604) + 1
+    logger.debug(f"Current page after modulo: {current_page}")
     
-    # If next page would exceed 604, wrap to page 1
-    if next_page > 604:
-        next_page = 1
+    # Calculate next page with proper wrapping
+    next_page = current_page + 1 if current_page < 604 else 1
+    
+    logger.info(f"Final calculated pages: {current_page} and {next_page}")
+    
+    # Validation check
+    if not (1 <= current_page <= 604 and 1 <= next_page <= 604):
+        logger.error(f"Invalid page numbers calculated: {current_page}, {next_page}")
+        # Fallback to start pages if calculation fails
+        return 436, 437
         
-    logger.info(f"Calculated Quran pages: {current_page} and {next_page}")
     return current_page, next_page
 
 async def send_quran_pages():
