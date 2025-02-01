@@ -86,70 +86,89 @@ async def find_previous_athkar(chat_id):
         logger.error(f"Error finding previous athkar: {e}")
     return None
 
-async def send_athkar(athkar_type):
-    """Send athkar with improved cleanup based on message timestamps"""
-    logger.info(f"Sending {athkar_type} Athkar")
-    
-    caption = "#أذكار_الصباح" if athkar_type == "morning" else "#أذكار_المساء"
-    image_url = f"{ATHKAR_URL}/{'أذكار_الصباح' if athkar_type == 'morning' else 'أذكار_المساء'}.jpg"
-    
-    try:
-        # Simplified message deletion logic
-        messages = await bot.get_chat_messages(chat_id=CHAT_ID, limit=20)
-        for msg in messages:
-            if (hasattr(msg, 'caption') and msg.caption and 
-                ("#أذكار_الصباح" in msg.caption or "#أذكار_المساء" in msg.caption)):
-                try:
-                    await bot.delete_message(chat_id=CHAT_ID, message_id=msg.message_id)
-                    logger.info(f"Deleted previous athkar message: {msg.message_id}")
-                except Exception as e:
-                    logger.error(f"Error deleting message {msg.message_id}: {e}")
-                break  # Only delete the most recent one
-
-        # Send new athkar message
-        message = await bot.send_photo(chat_id=CHAT_ID, photo=image_url, caption=caption)
-        if message:
-            logger.info(f"Successfully sent new athkar message: {message.message_id}")
-        else:
-            logger.error("Failed to send athkar message")
-
-    except Exception as e:
-        logger.error(f"Error in send_athkar: {e}")
-
 def get_next_quran_pages():
-    logger.info("Calculating Quran pages based on date")
+    """
+    Calculate next Quran pages starting from 436 on Jan 31, 2024,
+    incrementing by 2 pages each day
+    """
+    logger.info("Calculating next Quran pages")
     
-    # Set reference date and starting page
+    # Fixed reference point
     reference_date = datetime(2024, 1, 31).date()
-    start_page = 436
+    reference_page = 436
     
-    # Get current date
-    current_date = datetime.now(CAIRO_TZ).date()
+    # Get today's date
+    today = datetime.now(CAIRO_TZ).date()
     
     # Calculate days since reference date
-    days_passed = (current_date - reference_date).days
-    logger.debug(f"Days passed since reference: {days_passed}")
+    days_diff = (today - reference_date).days
     
-    # Calculate base page number
-    base_page = start_page + (days_passed * 2)
-    logger.debug(f"Base page before modulo: {base_page}")
+    # Calculate today's starting page
+    current_page = reference_page + (days_diff * 2)
     
-    # Apply modulo to get current page within Quran bounds
-    current_page = ((base_page - 1) % 604) + 1
-    logger.debug(f"Current page after modulo: {current_page}")
+    # Handle wrapping around the Quran
+    while current_page > 604:
+        current_page -= 604
     
-    # Calculate next page with proper wrapping
+    # Calculate next page
     next_page = current_page + 1 if current_page < 604 else 1
     
-    logger.info(f"Final calculated pages: {current_page} and {next_page}")
-    
-    # Validation check
-    if not (1 <= current_page <= 604 and 1 <= next_page <= 604):
-        logger.error(f"Invalid page numbers calculated: {current_page}, {next_page}")
-        # Fallback to start pages if calculation fails
-        return 436, 437
-        
+    logger.info(f"Calculated pages for {today}: {current_page} and {next_page}")
     return current_page, next_page
+
+async def send_athkar(athkar_type):
+    """
+    Send Athkar images and manage previous messages
+    athkar_type: 'morning' or 'night'
+    """
+    logger.info(f"Sending {athkar_type} Athkar")
+    
+    try:
+        # Prepare message content
+        is_morning = athkar_type == "morning"
+        image_name = "أذكار_الصباح" if is_morning else "أذكار_المساء"
+        caption = "#أذكار_الصباح" if is_morning else "#أذكار_المساء"
+        image_url = f"{ATHKAR_URL}/{image_name}.jpg"
+        
+        # Get recent messages from the channel
+        async for message in bot.get_messages(chat_id=CHAT_ID, limit=50):
+            try:
+                # Check if message is an Athkar message
+                if (hasattr(message, 'caption') and message.caption and 
+                    ("#أذكار_الصباح" in message.caption or "#أذكار_المساء" in message.caption)):
+                    # Delete old Athkar message
+                    await bot.delete_message(chat_id=CHAT_ID, message_id=message.message_id)
+                    logger.info(f"Deleted previous Athkar message: {message.message_id}")
+                    break  # Only delete the most recent one
+            except Exception as e:
+                logger.error(f"Error processing message {message.message_id}: {e}")
+                continue
+        
+        # Send new Athkar message
+        new_message = await bot.send_photo(
+            chat_id=CHAT_ID,
+            photo=image_url,
+            caption=caption
+        )
+        
+        if new_message:
+            logger.info(f"Successfully sent new {athkar_type} Athkar (Message ID: {new_message.message_id})")
+        else:
+            logger.error(f"Failed to send {athkar_type} Athkar")
+            
+    except Exception as e:
+        logger.error(f"Error in send_athkar: {e}", exc_info=True)
+        # Try one more time with a delay
+        try:
+            await asyncio.sleep(5)
+            new_message = await bot.send_photo(
+                chat_id=CHAT_ID,
+                photo=image_url,
+                caption=caption
+            )
+            logger.info(f"Retry successful for {athkar_type} Athkar")
+        except Exception as retry_error:
+            logger.error(f"Retry also failed: {retry_error}")
 
 async def send_quran_pages():
     logger.info("Entering send_quran_pages function")
