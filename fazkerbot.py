@@ -87,64 +87,71 @@ async def find_previous_athkar(chat_id):
     return None
 
 def get_next_quran_pages():
-    """
-    Calculate next Quran pages starting from 436 on Jan 31, 2024,
-    incrementing by 2 pages each day
-    """
+    """Calculate next Quran pages starting from 452 on Feb 9, 2024"""
     logger.info("Calculating next Quran pages")
     
     # Fixed reference point
-    reference_date = datetime(2024, 1, 31).date()
-    reference_page = 436
+    reference_date = datetime(2024, 2, 9).date()  # February 9, 2024
+    reference_page = 452  # Starting page
     
     # Get today's date
     today = datetime.now(CAIRO_TZ).date()
     
     # Calculate days since reference date
     days_diff = (today - reference_date).days
+    logger.debug(f"Days since reference date: {days_diff}")
     
     # Calculate today's starting page
-    current_page = reference_page + (days_diff * 2)
+    total_pages_to_add = days_diff * 2
+    current_page = reference_page + total_pages_to_add
     
-    # Handle wrapping around the Quran
-    while current_page > 604:
-        current_page -= 604
+    # Adjust for wrapping
+    total_pages = 604
+    if current_page > total_pages:
+        current_page = ((current_page - 1) % total_pages) + 1
     
-    # Calculate next page
-    next_page = current_page + 1 if current_page < 604 else 1
+    # Calculate next page with wrapping
+    next_page = current_page + 1
+    if next_page > total_pages:
+        next_page = 1
     
-    logger.info(f"Calculated pages for {today}: {current_page} and {next_page}")
+    # Validation and logging
+    logger.info(f"Date: {today}, Reference: {reference_date}")
+    logger.info(f"Days passed: {days_diff}, Pages to add: {total_pages_to_add}")
+    logger.info(f"Calculated pages: {current_page}, {next_page}")
+    
     return current_page, next_page
 
 async def send_athkar(athkar_type):
-    """
-    Send Athkar images and manage previous messages
-    athkar_type: 'morning' or 'night'
-    """
+    """Send athkar with reliable message cleanup"""
     logger.info(f"Sending {athkar_type} Athkar")
     
+    caption = "#أذكار_الصباح" if athkar_type == "morning" else "#أذكار_المساء"
+    image_url = f"{ATHKAR_URL}/{'أذكار_الصباح' if athkar_type == 'morning' else 'أذكار_المساء'}.jpg"
+    
     try:
-        # Prepare message content
-        is_morning = athkar_type == "morning"
-        image_name = "أذكار_الصباح" if is_morning else "أذكار_المساء"
-        caption = "#أذكار_الصباح" if is_morning else "#أذكار_المساء"
-        image_url = f"{ATHKAR_URL}/{image_name}.jpg"
+        # First, get channel history and find existing athkar messages
+        messages = await bot.get_chat_history(chat_id=CHAT_ID, limit=100)
+        athkar_messages = []
         
-        # Get recent messages from the channel
-        async for message in bot.get_messages(chat_id=CHAT_ID, limit=50):
-            try:
-                # Check if message is an Athkar message
-                if (hasattr(message, 'caption') and message.caption and 
-                    ("#أذكار_الصباح" in message.caption or "#أذكار_المساء" in message.caption)):
-                    # Delete old Athkar message
-                    await bot.delete_message(chat_id=CHAT_ID, message_id=message.message_id)
-                    logger.info(f"Deleted previous Athkar message: {message.message_id}")
-                    break  # Only delete the most recent one
-            except Exception as e:
-                logger.error(f"Error processing message {message.message_id}: {e}")
-                continue
+        async for message in messages:
+            if (hasattr(message, 'caption') and 
+                message.caption and 
+                any(tag in message.caption for tag in ["#أذكار_الصباح", "#أذكار_المساء"])):
+                athkar_messages.append(message)
+                if len(athkar_messages) >= 2:  # We only need to find up to 2 messages
+                    break
         
-        # Send new Athkar message
+        # Delete older athkar message if found
+        if athkar_messages:
+            for msg in athkar_messages:
+                try:
+                    await bot.delete_message(chat_id=CHAT_ID, message_id=msg.message_id)
+                    logger.info(f"Deleted athkar message: {msg.message_id}")
+                except Exception as e:
+                    logger.error(f"Failed to delete message {msg.message_id}: {e}")
+        
+        # Send new athkar message
         new_message = await bot.send_photo(
             chat_id=CHAT_ID,
             photo=image_url,
@@ -152,13 +159,13 @@ async def send_athkar(athkar_type):
         )
         
         if new_message:
-            logger.info(f"Successfully sent new {athkar_type} Athkar (Message ID: {new_message.message_id})")
+            logger.info(f"Successfully sent new {athkar_type} athkar: {new_message.message_id}")
         else:
-            logger.error(f"Failed to send {athkar_type} Athkar")
+            logger.error("Failed to send new athkar message")
             
     except Exception as e:
         logger.error(f"Error in send_athkar: {e}", exc_info=True)
-        # Try one more time with a delay
+        # Retry once on failure
         try:
             await asyncio.sleep(5)
             new_message = await bot.send_photo(
@@ -166,7 +173,7 @@ async def send_athkar(athkar_type):
                 photo=image_url,
                 caption=caption
             )
-            logger.info(f"Retry successful for {athkar_type} Athkar")
+            logger.info("Successfully sent athkar on retry")
         except Exception as retry_error:
             logger.error(f"Retry also failed: {retry_error}")
 
