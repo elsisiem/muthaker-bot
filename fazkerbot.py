@@ -87,69 +87,55 @@ async def find_previous_athkar(chat_id):
     return None
 
 def get_next_quran_pages():
-    """Calculate next Quran pages starting from Feb 13, 2025, pages 460, 461"""
-    logger.info("Calculating next Quran pages based on date")
+    """Calculate next Quran pages anchored to Feb 20, 2025, pages 474, 475.
+Each day increases both pages by 2 consecutively.
+Wrap around to 1 after reaching page 604."""
+    logger.info("Calculating next Quran pages based on new anchor")
+    # Anchor definition
+    anchor_date = datetime(2025, 2, 20).date()  # Anchor date: Feb 20, 2025
+    anchor_page1 = 474
+    anchor_page2 = 475
+    total_pages = 604  # Maximum page number
 
-    # Define the start date and initial page numbers
-    start_date = datetime(2025, 2, 13).date()
-    start_page1 = 460
-    start_page2 = 461
-    total_pages = 604 - 460 + 1  # Total number of pages in the sequence
-    loop_start = 460  # The page number to loop back to
-
-    # Get the current date
     today = datetime.now(CAIRO_TZ).date()
+    days_diff = (today - anchor_date).days
+    logger.debug(f"Days since anchor date: {days_diff}")
 
-    # Calculate the difference in days between the current date and the start date
-    days_diff = (today - start_date).days
-    logger.debug(f"Days since start date: {days_diff}")
+    # Increment pages by 2 per day
+    page1 = anchor_page1 + days_diff * 2
+    page2 = anchor_page2 + days_diff * 2
 
-    # Calculate the page numbers based on the day difference
-    page1 = (start_page1 + days_diff) % total_pages
-    page2 = (start_page2 + days_diff) % total_pages
+    # Wrapping logic: if page exceeds total_pages, wrap around to 1.
+    def wrap(page):
+        return ((page - 1) % total_pages) + 1
 
-    # Adjust page numbers to be within the desired range (loopStart to 604)
-    page1 = loop_start + page1
-    page2 = loop_start + page2
+    page1 = wrap(page1)
+    page2 = wrap(page2)
 
-    # Ensure that page numbers loop back to the start
-    if page1 > 604:
-        page1 = loop_start + (page1 - 605)
-    if page2 > 604:
-        page2 = loop_start + (page2 - 605)
-
-    # Validation and logging
-    logger.info(f"Date: {today}, Start Date: {start_date}")
-    logger.info(f"Days passed: {days_diff}")
-    logger.info(f"Calculated pages: {page1}, {page2}")
-
+    logger.info(f"Calculated pages for {today}: {page1}, {page2}")
     return int(page1), int(page2)
 
 async def send_athkar(athkar_type):
-    """Send athkar with reliable message cleanup"""
+    """Send athkar with reliable cyclic deletion of the opposite athkar type"""
     logger.info(f"Sending {athkar_type} Athkar")
     
     caption = "#أذكار_الصباح" if athkar_type == "morning" else "#أذكار_المساء"
-    image_url = f"{ATHKAR_URL}/{'أذكار_الصباح' if athkar_type == 'morning' else 'أذكار_المساء'}.jpg"
+    image_url = f"{ATHKAR_URL}/{'أذكار_الصباح' if athkar_type == "morning" else 'أذكار_المساء'}.jpg"
     
-    # Determine the tag of the athkar to be deleted
+    # For morning send, delete all previous night athkar; for night send, delete all previous morning athkar.
     delete_tag = "#أذكار_المساء" if athkar_type == "morning" else "#أذكار_الصباح"
     
     try:
-        # First, get channel history and find existing athkar messages
+        # Fetch recent chat history
         messages = await bot.get_chat_history(chat_id=CHAT_ID, limit=100)
-        
-        # Find the athkar message with the tag to be deleted
+        # Delete all messages containing the opposite athkar tag found
         for message in messages:
-            if (hasattr(message, 'caption') and 
-                message.caption and 
-                delete_tag in message.caption):
+            if hasattr(message, 'caption') and message.caption and delete_tag in message.caption:
                 try:
                     await bot.delete_message(chat_id=CHAT_ID, message_id=message.message_id)
-                    logger.info(f"Deleted previous athkar message: {message.message_id} with tag {delete_tag}")
+                    logger.info(f"Deleted message {message.message_id} with tag {delete_tag}")
                 except Exception as e:
                     logger.error(f"Failed to delete message {message.message_id}: {e}")
-                break  # Delete only the most recent message with the tag
         
         # Send new athkar message
         new_message = await bot.send_photo(
@@ -165,7 +151,6 @@ async def send_athkar(athkar_type):
             
     except Exception as e:
         logger.error(f"Error in send_athkar: {e}", exc_info=True)
-        # Retry once on failure
         try:
             await asyncio.sleep(5)
             new_message = await bot.send_photo(
