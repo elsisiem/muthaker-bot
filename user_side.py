@@ -287,27 +287,37 @@ async def init_db():
 
 # Initialize the application
 application = Application.builder().token(os.environ["TELEGRAM_BOT_TOKEN"]).build()
+
+# Create conversation handler but don't add it yet
 conversation_handler = get_conversation_handler()
-application.add_handler(conversation_handler)
-application.add_handler(CallbackQueryHandler(
-    lambda update, context: athkar_config_entry(update, context),
-    pattern="^config_athkar$"
-))
-application.add_handler(CallbackQueryHandler(
-    lambda update, context: quran_config_entry(update, context),
-    pattern="^config_quran$"
-))
-application.add_handler(CallbackQueryHandler(
-    lambda update, context: sleep_config_entry(update, context),
-    pattern="^config_sleep$"
-))
-application.add_handler(CallbackQueryHandler(
-    lambda update, context: city_config_entry(update, context),
-    pattern="^config_city$"
-))
 
 # Add async initialization function
 async def init_application():
+    """Initialize the application and database"""
+    logger.info("Initializing user_side application...")
     await application.initialize()
     await init_db()
+    
+    # Register handlers
+    application.add_handler(conversation_handler)
+    application.add_handler(CallbackQueryHandler(
+        lambda update, context: athkar_config_entry(update, context),
+        pattern="^config_athkar$"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        lambda update, context: quran_config_entry(update, context),
+        pattern="^config_quran$"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        lambda update, context: sleep_config_entry(update, context),
+        pattern="^config_sleep$"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        lambda update, context: city_config_entry(update, context),
+        pattern="^config_city$"
+    ))
+    
+    # Add an explicit start command handler
+    application.add_handler(CommandHandler("start", start))
+    
     logger.info("User configuration bot initialized.")
