@@ -1,1 +1,1 @@
-web: python fazkerbot.py
+web: python main.py
