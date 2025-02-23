@@ -1,4 +1,5 @@
 import asyncio
+from telegram import Update
 from fazkerbot import main as bot_main
 from user_side import application as user_app, init_application
 
