@@ -280,32 +280,29 @@ def get_conversation_handler() -> ConversationHandler:
         fallbacks=[CommandHandler("cancel", lambda update, context: update.message.reply_text("Configuration cancelled."))]
     )
 
-async def main() -> None:
-    """Creates the Telegram application, initializes the database, and starts polling."""
-    application = Application.builder().token(os.environ["TELEGRAM_BOT_TOKEN"]).build()
-    conversation_handler = get_conversation_handler()
-    application.add_handler(conversation_handler)
-    application.add_handler(CallbackQueryHandler(
-        lambda update, context: athkar_config_entry(update, context),
-        pattern="^config_athkar$"
-    ))
-    application.add_handler(CallbackQueryHandler(
-        lambda update, context: quran_config_entry(update, context),
-        pattern="^config_quran$"
-    ))
-    application.add_handler(CallbackQueryHandler(
-        lambda update, context: sleep_config_entry(update, context),
-        pattern="^config_sleep$"
-    ))
-    application.add_handler(CallbackQueryHandler(
-        lambda update, context: city_config_entry(update, context),
-        pattern="^config_city$"
-    ))
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    
-    logger.info("User configuration bot running.")
-    await application.run_polling()
+# Instead of defining main(), expose the application
+application = Application.builder().token(os.environ["TELEGRAM_BOT_TOKEN"]).build()
+conversation_handler = get_conversation_handler()
+application.add_handler(conversation_handler)
+application.add_handler(CallbackQueryHandler(
+    lambda update, context: athkar_config_entry(update, context),
+    pattern="^config_athkar$"
+))
+application.add_handler(CallbackQueryHandler(
+    lambda update, context: quran_config_entry(update, context),
+    pattern="^config_quran$"
+))
+application.add_handler(CallbackQueryHandler(
+    lambda update, context: sleep_config_entry(update, context),
+    pattern="^config_sleep$"
+))
+application.add_handler(CallbackQueryHandler(
+    lambda update, context: city_config_entry(update, context),
+    pattern="^config_city$"
+))
 
-if __name__ == "__main__":
-    asyncio.run(main())
+async with engine.begin() as conn:
+    await conn.run_sync(Base.metadata.create_all)
+
+logger.info("User configuration bot running.")
+await application.run_polling()
