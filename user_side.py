@@ -306,5 +306,10 @@ application.add_handler(CallbackQueryHandler(
     pattern="^config_city$"
 ))
 
+# Add async initialization function
+async def init_application():
+    await application.initialize()
+    await init_db()
+
 logger.info("User configuration bot initialized.")
 # Remove the await application.run_polling() from here - it's called from main.py
