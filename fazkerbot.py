@@ -21,7 +21,7 @@ QURAN_PAGES_URL = f"{GITHUB_RAW_URL}/%D8%A7%D9%84%D9%85%D8%B5%D8%AD%D9%81"
 ATHKAR_URL = f"{GITHUB_RAW_URL}/%D8%A7%D9%84%D8%A3%D8%B0%D9%83%D8%A7%D8%B1"
 
 # Setup logging
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname%s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # Initialize bot and scheduler
@@ -121,7 +121,7 @@ async def send_athkar(athkar_type):
     
     # Remove caption from athkar messages
     caption = None  
-    image_url = f"{ATHKAR_URL}/{'أذكار_الصباح' if athkar_type == "morning" else 'أذكار_المساء'}.jpg"
+    image_url = f"{ATHKAR_URL}/{'أذكار_الصباح' if athkar_type == 'morning' else 'أذكار_المساء'}.jpg"
     
     # For deletion, instead of checking caption text, we check if the image URL contains the opposite identifier.
     # (This assumes that the image URLs contain 'أذكار_الصباح' or 'أذكار_المساء'.)
@@ -404,4 +404,3 @@ if __name__ == "__main__":
         logger.critical(f"Critical error in main execution: {e}", exc_info=True)
     finally:
         scheduler.shutdown()
-        connection_pool.closeall()
