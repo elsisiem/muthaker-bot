@@ -2,11 +2,16 @@ import os
 import asyncio
 from aiohttp import web
 from telegram import Update
-from fazkerbot import main as bot_main, app
+
+from fazkerbot import main as bot_main, handle
 from user_side import application as user_app, init_application
 
 async def combined_main():
-    # Initialize web app
+    # Create single web app
+    app = web.Application()
+    app.router.add_get("/", handle)  # Use the handler from fazkerbot
+    
+    # Setup web server
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', int(os.environ.get('PORT', 8080)))

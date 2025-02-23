@@ -357,27 +357,14 @@ app = web.Application()
 app.router.add_get("/", handle)
 
 async def main():
-    # Remove web app setup since it's now at module level
-    # Start web server
-    port = int(os.environ.get('PORT', 8080))
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
-    logger.info(f"Web server started on port {port}")
-
-    # Test Telegram connection and log initial status
+    # Remove web server setup since it's now in main.py
     await test_telegram_connection()
-    await log_status_message()  # Log status without sending to channel
+    await log_status_message()
     
-    # Start the scheduler
     scheduler.start()
     logger.info("Scheduler started")
     
-    # Schedule initial tasks
     await schedule_tasks()
-    
-    # Start heartbeat
     heartbeat_task = asyncio.create_task(heartbeat())
     
     last_scheduled_date = datetime.now(CAIRO_TZ).date()
