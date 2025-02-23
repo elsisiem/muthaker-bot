@@ -280,7 +280,12 @@ def get_conversation_handler() -> ConversationHandler:
         fallbacks=[CommandHandler("cancel", lambda update, context: update.message.reply_text("Configuration cancelled."))]
     )
 
-# Instead of defining main(), expose the application
+# Instead of having async with at module level, create an init function
+async def init_db():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+# Initialize the application
 application = Application.builder().token(os.environ["TELEGRAM_BOT_TOKEN"]).build()
 conversation_handler = get_conversation_handler()
 application.add_handler(conversation_handler)
@@ -301,8 +306,5 @@ application.add_handler(CallbackQueryHandler(
     pattern="^config_city$"
 ))
 
-async with engine.begin() as conn:
-    await conn.run_sync(Base.metadata.create_all)
-
-logger.info("User configuration bot running.")
-await application.run_polling()
+logger.info("User configuration bot initialized.")
+# Remove the await application.run_polling() from here - it's called from main.py

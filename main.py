@@ -1,16 +1,15 @@
 import asyncio
 from fazkerbot import main as bot_main
-from user_side import application as user_app, engine, Base
+from user_side import application as user_app, init_db
 
 async def combined_main():
     # Initialize user_side database
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    await init_db()
     
     # Start both applications
     await asyncio.gather(
         bot_main(),
-        user_app.run_polling(allowed_updates=Update.ALL_TYPES, close_loop=False)
+        user_app.run_polling(close_loop=False)
     )
 
 if __name__ == "__main__":
