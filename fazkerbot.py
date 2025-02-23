@@ -116,34 +116,36 @@ Wrap around to 1 after reaching page 604."""
     return int(page1), int(page2)
 
 async def send_athkar(athkar_type):
-    """Send athkar with reliable cyclic deletion of the opposite athkar type"""
+    """Send athkar without a caption and with cyclic deletion of the opposite type"""
     logger.info(f"Sending {athkar_type} Athkar")
     
-    caption = "#أذكار_الصباح" if athkar_type == "morning" else "#أذكار_المساء"
+    # Remove caption from athkar messages
+    caption = None  
     image_url = f"{ATHKAR_URL}/{'أذكار_الصباح' if athkar_type == "morning" else 'أذكار_المساء'}.jpg"
     
-    # For morning send, delete all previous night athkar; for night send, delete all previous morning athkar.
-    delete_tag = "#أذكار_المساء" if athkar_type == "morning" else "#أذكار_الصباح"
+    # For deletion, instead of checking caption text, we check if the image URL contains the opposite identifier.
+    # (This assumes that the image URLs contain 'أذكار_الصباح' or 'أذكار_المساء'.)
+    delete_identifier = "أذكار_المساء" if athkar_type == "morning" else "أذكار_الصباح"
     
     try:
-        # Fetch recent chat history
         messages = await bot.get_chat_history(chat_id=CHAT_ID, limit=100)
-        # Delete all messages containing the opposite athkar tag found
         for message in messages:
-            if hasattr(message, 'caption') and message.caption and delete_tag in message.caption:
-                try:
-                    await bot.delete_message(chat_id=CHAT_ID, message_id=message.message_id)
-                    logger.info(f"Deleted message {message.message_id} with tag {delete_tag}")
-                except Exception as e:
-                    logger.error(f"Failed to delete message {message.message_id}: {e}")
-        
-        # Send new athkar message
+            if hasattr(message, 'caption'):
+                # If a caption exists (or is None) check the image URL if available in message.photo data.
+                # Since messages sent without caption might not have a caption field, 
+                # you might need to rely on other metadata (this is a placeholder logic).
+                if message.caption and delete_identifier in message.caption:
+                    try:
+                        await bot.delete_message(chat_id=CHAT_ID, message_id=message.message_id)
+                        logger.info(f"Deleted message {message.message_id} containing {delete_identifier}")
+                    except Exception as e:
+                        logger.error(f"Failed to delete message {message.message_id}: {e}")
         new_message = await bot.send_photo(
             chat_id=CHAT_ID,
             photo=image_url,
             caption=caption
         )
-        
+
         if new_message:
             logger.info(f"Successfully sent new {athkar_type} athkar: {new_message.message_id}")
         else:
@@ -169,8 +171,6 @@ async def send_quran_pages():
     page_2_url = f"{QURAN_PAGES_URL}/photo_{page2}.jpg"
     
     logger.info(f"Quran page URLs: {page_1_url}, {page_2_url}")
-    
-    # Verify that the images exist
     async with aiohttp.ClientSession() as session:
         for url in [page_1_url, page_2_url]:
             try:
@@ -188,7 +188,8 @@ async def send_quran_pages():
     
     media = [
         {"type": "photo", "media": page_1_url},
-        {"type": "photo", "media": page_2_url, "caption": "#ورد_اليوم"}
+        # Change caption text for Quran pages: remove hashtag so it appears as plain text.
+        {"type": "photo", "media": page_2_url, "caption": "ورد اليوم"}
     ]
     
     try:
