@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 # DATABASE_URL updated with actual credentials
 DATABASE_URL = os.environ.get(
     "DATABASE_URL",
-    "postgres://u3cmevgl2g6c6j:paf6377466881a2403b02f14624b98bf68879ed773b2ccf111d397fe536a381b9@c9pv5s2sq0i76o.cluster-czrs8kj4isg7.us-east-1.rds.amazonaws.com:5432/d1f1puvchrt773"
+    "postgresql+asyncpg://u3cmevgl2g6c6j:paf6377466881a2403b02f14624b98bf68879ed773b2ccf111d397fe536a381b9@c9pv5s2sq0i76o.cluster-czrs8kj4isg7.us-east-1.rds.amazonaws.com:5432/d1f1puvchrt773"
 )
 engine = create_async_engine(DATABASE_URL, echo=True)
 Base = declarative_base()
