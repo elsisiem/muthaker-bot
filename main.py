@@ -36,7 +36,7 @@ async def combined_main():
         try:
             await asyncio.gather(
                 bot_main(),
-                user_app.start_polling(drop_pending_updates=True)  # Changed to start_polling
+                user_app.run_polling(drop_pending_updates=True)  # Changed from start_polling to run_polling
             )
         except Exception as e:
             logger.exception("Error in bot execution")
