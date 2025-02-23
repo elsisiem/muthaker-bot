@@ -69,27 +69,41 @@ ATHKAR_LIST = [
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start the configuration conversation."""
-    user_id = str(update.effective_user.id)
-    # Ensure the user exists in database (create or fetch)
-    async with async_session() as session:
-        result = await session.execute(
-            "SELECT id FROM users WHERE telegram_id = :tid", {"tid": user_id}
+    logger.info(f"Start command received from user {update.effective_user.id}")
+    try:
+        user_id = str(update.effective_user.id)
+        # Ensure the user exists in database (create or fetch)
+        async with async_session() as session:
+            result = await session.execute(
+                "SELECT id FROM users WHERE telegram_id = :tid", {"tid": user_id}
+            )
+            user = result.first()
+            if not user:
+                new_user = User(telegram_id=user_id)
+                session.add(new_user)
+                await session.commit()
+                logger.info(f"Created new user: {user_id}")
+            else:
+                logger.info(f"Existing user: {user_id}")
+                
+        # Present configuration options
+        keyboard = [
+            [InlineKeyboardButton("Configure Athkar Reminders", callback_data="config_athkar")],
+            [InlineKeyboardButton("Configure Quran Wird", callback_data="config_quran")],
+            [InlineKeyboardButton("Set Sleep-Time Supplications", callback_data="config_sleep")],
+            [InlineKeyboardButton("Set City/Timezone", callback_data="config_city")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(
+            "Welcome to مذكر! Choose a configuration option:", 
+            reply_markup=reply_markup
         )
-        user = result.first()
-        if not user:
-            new_user = User(telegram_id=user_id)
-            session.add(new_user)
-            await session.commit()
-    # Present configuration options
-    keyboard = [
-        [InlineKeyboardButton("Configure Athkar Reminders", callback_data="config_athkar")],
-        [InlineKeyboardButton("Configure Quran Wird", callback_data="config_quran")],
-        [InlineKeyboardButton("Set Sleep-Time Supplications", callback_data="config_sleep")],
-        [InlineKeyboardButton("Set City/Timezone", callback_data="config_city")],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Welcome to مذكر! Choose a configuration option:", reply_markup=reply_markup)
-    return ConversationHandler.END
+        logger.info("Sent welcome message with options")
+        return ConversationHandler.END
+    except Exception as e:
+        logger.exception("Error in start command")
+        await update.message.reply_text("An error occurred. Please try again with /start")
+        return ConversationHandler.END
 
 # --- Athkar Configuration Flow ---
 async def athkar_config_entry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -295,29 +309,33 @@ conversation_handler = get_conversation_handler()
 async def init_application():
     """Initialize the application and database"""
     logger.info("Initializing user_side application...")
-    await application.initialize()
-    await init_db()
-    
-    # Register handlers
-    application.add_handler(conversation_handler)
-    application.add_handler(CallbackQueryHandler(
-        lambda update, context: athkar_config_entry(update, context),
-        pattern="^config_athkar$"
-    ))
-    application.add_handler(CallbackQueryHandler(
-        lambda update, context: quran_config_entry(update, context),
-        pattern="^config_quran$"
-    ))
-    application.add_handler(CallbackQueryHandler(
-        lambda update, context: sleep_config_entry(update, context),
-        pattern="^config_sleep$"
-    ))
-    application.add_handler(CallbackQueryHandler(
-        lambda update, context: city_config_entry(update, context),
-        pattern="^config_city$"
-    ))
-    
-    # Add an explicit start command handler
-    application.add_handler(CommandHandler("start", start))
-    
-    logger.info("User configuration bot initialized.")
+    try:
+        await application.initialize()
+        await init_db()
+        
+        # Add command handlers first
+        application.add_handler(CommandHandler("start", start))
+        
+        # Then add conversation and callback handlers
+        application.add_handler(conversation_handler)
+        application.add_handler(CallbackQueryHandler(
+            athkar_config_entry,
+            pattern="^config_athkar$"
+        ))
+        application.add_handler(CallbackQueryHandler(
+            quran_config_entry,
+            pattern="^config_quran$"
+        ))
+        application.add_handler(CallbackQueryHandler(
+            sleep_config_entry,
+            pattern="^config_sleep$"
+        ))
+        application.add_handler(CallbackQueryHandler(
+            city_config_entry,
+            pattern="^config_city$"
+        ))
+        
+        logger.info("All handlers registered successfully")
+    except Exception as e:
+        logger.exception("Error in init_application")
+        raise
