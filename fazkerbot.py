@@ -352,11 +352,12 @@ async def log_status_message():
     except Exception as e:
         logger.error(f"Error creating status log: {e}")
 
+# Add web app definition
+app = web.Application()
+app.router.add_get("/", handle)
+
 async def main():
-    # Setup web app
-    app = web.Application()
-    app.router.add_get("/", handle)
-    
+    # Remove web app setup since it's now at module level
     # Start web server
     port = int(os.environ.get('PORT', 8080))
     runner = web.AppRunner(app)
