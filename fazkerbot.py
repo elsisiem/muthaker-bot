@@ -257,11 +257,12 @@ async def schedule_tasks():
                 'time': evening_athkar_time,
                 'description': '🌙 Evening Athkar'
             },
-            {
-                'type': 'quran',
-                'time': quran_time,
-                'description': f'📖 Quran Pages {next_pages[0]}-{next_pages[1]}'
-            }
+            # Temporarily disabled for Ramadan
+            # {
+            #     'type': 'quran',
+            #     'time': quran_time,
+            #     'description': f'📖 Quran Pages {next_pages[0]}-{next_pages[1]}'
+            # }
         ])
 
         # Schedule jobs
