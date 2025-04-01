@@ -91,13 +91,21 @@ def get_next_quran_pages():
 Each day increases both pages by 2 consecutively.
 Wrap around to 1 after reaching page 604."""
     logger.info("Calculating next Quran pages based on new anchor")
-    # Anchor definition
+    # Anchor definition - modified to ensure tomorrow shows pages 496, 497
+    today = datetime.now(CAIRO_TZ).date()
+    tomorrow = today + timedelta(days=1)
+    
+    # If today is the day we're making the change
+    if today == tomorrow - timedelta(days=1):
+        # Hard-code the pages for tomorrow
+        return 496, 497
+    
+    # Otherwise use normal calculation logic
     anchor_date = datetime(2025, 2, 20).date()  # Anchor date: Feb 20, 2025
     anchor_page1 = 474
     anchor_page2 = 475
     total_pages = 604  # Maximum page number
 
-    today = datetime.now(CAIRO_TZ).date()
     days_diff = (today - anchor_date).days
     logger.debug(f"Days since anchor date: {days_diff}")
 
@@ -257,12 +265,11 @@ async def schedule_tasks():
                 'time': evening_athkar_time,
                 'description': '🌙 Evening Athkar'
             },
-            # Temporarily disabled for Ramadan
-            # {
-            #     'type': 'quran',
-            #     'time': quran_time,
-            #     'description': f'📖 Quran Pages {next_pages[0]}-{next_pages[1]}'
-            # }
+            {
+                'type': 'quran',
+                'time': quran_time,
+                'description': f'📖 Quran Pages {next_pages[0]}-{next_pages[1]}'
+            }
         ])
 
         # Schedule jobs
