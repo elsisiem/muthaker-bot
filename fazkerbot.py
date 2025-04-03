@@ -87,25 +87,15 @@ async def find_previous_athkar(chat_id):
     return None
 
 def get_next_quran_pages():
-    """Calculate next Quran pages anchored to Feb 20, 2025, pages 474, 475.
-Each day increases both pages by 2 consecutively.
-Wrap around to 1 after reaching page 604."""
+    """Calculate next Quran pages based on anchor date"""
     logger.info("Calculating next Quran pages based on new anchor")
-    # Anchor definition - modified to ensure tomorrow shows pages 496, 497
-    today = datetime.now(CAIRO_TZ).date()
-    tomorrow = today + timedelta(days=1)
-    
-    # If today is the day we're making the change
-    if today == tomorrow - timedelta(days=1):
-        # Hard-code the pages for tomorrow
-        return 496, 497
-    
-    # Otherwise use normal calculation logic
-    anchor_date = datetime(2025, 2, 20).date()  # Anchor date: Feb 20, 2025
-    anchor_page1 = 474
-    anchor_page2 = 475
+    # Modified anchor to align with April 4th, 2025 target
+    anchor_date = datetime(2025, 4, 4).date()  # New anchor date: April 4th
+    anchor_page1 = 500  # Anchor page
+    anchor_page2 = 501  # Anchor page
     total_pages = 604  # Maximum page number
 
+    today = datetime.now(CAIRO_TZ).date()
     days_diff = (today - anchor_date).days
     logger.debug(f"Days since anchor date: {days_diff}")
 
