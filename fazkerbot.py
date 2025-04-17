@@ -21,7 +21,7 @@ QURAN_PAGES_URL = f"{GITHUB_RAW_URL}/%D8%A7%D9%84%D9%85%D8%B5%D8%AD%D9%81"
 ATHKAR_URL = f"{GITHUB_RAW_URL}/%D8%A7%D9%84%D8%A3%D8%B0%D9%83%D8%A7%D8%B1"
 
 # Setup logging
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname%s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # Initialize bot and scheduler
@@ -32,8 +32,19 @@ async def fetch_prayer_times():
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(API_URL, params=API_PARAMS) as response:
+                if response.status != 200:
+                    logger.error(f"API request failed with status {response.status}")
+                    return None
+                    
                 data = await response.json()
-                return data['data']['timings']
+                timings = data.get('data', {}).get('timings')
+                
+                if not timings or not all(prayer in timings for prayer in ['Fajr', 'Asr']):
+                    logger.error("Missing required prayer times in API response")
+                    return None
+                
+                logger.info(f"Successfully fetched prayer times: {timings}")
+                return timings
     except Exception as e:
         logger.error(f"Error fetching prayer times: {e}")
         return None
@@ -119,7 +130,7 @@ async def send_athkar(athkar_type):
     
     # Remove caption from athkar messages
     caption = None  
-    image_url = f"{ATHKAR_URL}/{'أذكار_الصباح' if athkar_type == "morning" else 'أذكار_المساء'}.jpg"
+    image_url = f"{ATHKAR_URL}/{'أذكار_الصباح' if athkar_type == 'morning' else 'أذكار_المساء'}.jpg"
     
     # For deletion, instead of checking caption text, we check if the image URL contains the opposite identifier.
     # (This assumes that the image URLs contain 'أذكار_الصباح' or 'أذكار_المساء'.)
@@ -209,7 +220,7 @@ async def schedule_tasks():
     try:
         prayer_times = await fetch_prayer_times()
         if not prayer_times:
-            logger.error("Failed to fetch prayer times")
+            logger.error("Failed to fetch prayer times, cannot proceed with scheduling")
             return
 
         global DAILY_TASKS
@@ -221,20 +232,55 @@ async def schedule_tasks():
 
         def get_prayer_time(prayer, for_tomorrow=False):
             target_date = tomorrow if for_tomorrow else today
-            return CAIRO_TZ.localize(datetime.strptime(f"{target_date} {prayer_times[prayer]}", "%Y-%m-%d %H:%M"))
+            try:
+                time_str = prayer_times[prayer]
+                if not time_str or len(time_str.split(':')) != 2:
+                    logger.error(f"Invalid time format for {prayer}: {time_str}")
+                    return None
+                
+                hour, minute = map(int, time_str.split(':'))
+                prayer_time = datetime.combine(target_date, datetime.min.time().replace(hour=hour, minute=minute))
+                localized_time = CAIRO_TZ.localize(prayer_time)
+                logger.info(f"Parsed {prayer} time: {localized_time}")
+                return localized_time
+            except Exception as e:
+                logger.error(f"Error parsing prayer time for {prayer}: {e}")
+                return None
 
-        # Calculate all task times for today first
+        # Calculate prayer times
         fajr_time = get_prayer_time('Fajr')
         asr_time = get_prayer_time('Asr')
         
+        if not fajr_time or not asr_time:
+            logger.error("Critical prayer times are invalid, cannot schedule tasks")
+            return
+
+        logger.info(f"Using prayer times - Fajr: {fajr_time}, Asr: {asr_time}")
+        
+        # Calculate athkar times
         morning_athkar_time = fajr_time + timedelta(minutes=35)
         evening_athkar_time = asr_time + timedelta(minutes=35)
         quran_time = asr_time + timedelta(minutes=45)
-        
-        # If morning athkar time has passed, schedule for tomorrow
+
+        # Verify calculated times are valid
+        if not all([morning_athkar_time, evening_athkar_time, quran_time]):
+            logger.error("Failed to calculate valid task times")
+            return
+
+        logger.info(f"Initial calculated times:")
+        logger.info(f"Morning Athkar: {morning_athkar_time}")
+        logger.info(f"Evening Athkar: {evening_athkar_time}")
+        logger.info(f"Quran time: {quran_time}")
+
+        # If morning athkar time has passed, schedule for tomorrow with fresh prayer times
         if morning_athkar_time <= now:
-            morning_athkar_time = get_prayer_time('Fajr', True) + timedelta(minutes=35)
-        
+            fajr_tomorrow = get_prayer_time('Fajr', True)
+            if not fajr_tomorrow:
+                logger.error("Failed to get tomorrow's Fajr time")
+                return
+            morning_athkar_time = fajr_tomorrow + timedelta(minutes=35)
+            logger.info(f"Rescheduled morning athkar for tomorrow: {morning_athkar_time}")
+
         # Add morning athkar task
         DAILY_TASKS.append({
             'type': 'morning_athkar',
