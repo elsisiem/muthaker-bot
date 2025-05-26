@@ -31,8 +31,14 @@ FALLBACK_PRAYER_TIMES = {
 }
 
 # Setup logging
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# Reduce noise from third-party libraries
+logging.getLogger('httpcore').setLevel(logging.WARNING)
+logging.getLogger('httpx').setLevel(logging.WARNING)
+logging.getLogger('telegram').setLevel(logging.WARNING)
+logging.getLogger('apscheduler').setLevel(logging.WARNING)
 
 # Initialize bot and scheduler
 bot = Bot(TOKEN)
@@ -211,7 +217,6 @@ async def find_previous_athkar(chat_id):
 
 def get_next_quran_pages():
     """Calculate next Quran pages based on anchor date"""
-    logger.info("Calculating next Quran pages based on new anchor")
     # Recalibrated anchor to align with May 27th, 2025 target (pages 2-3)
     anchor_date = datetime(2025, 5, 27).date()  # New anchor date: May 27th, 2025
     anchor_page1 = 2  # Anchor page
@@ -220,7 +225,10 @@ def get_next_quran_pages():
 
     today = datetime.now(CAIRO_TZ).date()
     days_diff = (today - anchor_date).days
-    logger.debug(f"Days since anchor date: {days_diff}")
+    
+    logger.info(f"📅 Date: {today}")
+    logger.info(f"📅 Anchor date: {anchor_date}")
+    logger.info(f"📅 Days difference: {days_diff}")
 
     # Increment pages by 2 per day
     page1 = anchor_page1 + days_diff * 2
@@ -228,12 +236,48 @@ def get_next_quran_pages():
 
     # Wrapping logic: if page exceeds total_pages, wrap around to 1.
     def wrap(page):
-        return ((page - 1) % total_pages) + 1
+        if page <= 0:
+            # Handle negative pages by wrapping from the end
+            while page <= 0:
+                page += total_pages
+        elif page > total_pages:
+            # Handle pages beyond total by wrapping to beginning
+            page = ((page - 1) % total_pages) + 1
+        return page
 
     page1 = wrap(page1)
     page2 = wrap(page2)
 
-    logger.info(f"Calculated pages for {today}: {page1}, {page2}")
+    logger.info(f"📖 Quran pages for {today}: {page1}-{page2}")
+    return int(page1), int(page2)
+
+def get_next_quran_pages_for_date(target_date):
+    """Calculate Quran pages for a specific date"""
+    anchor_date = datetime(2025, 5, 27).date()
+    anchor_page1 = 2
+    anchor_page2 = 3
+    total_pages = 604
+
+    days_diff = (target_date - anchor_date).days
+    
+    logger.info(f"📅 Target date: {target_date}")
+    logger.info(f"📅 Days difference from anchor: {days_diff}")
+
+    page1 = anchor_page1 + days_diff * 2
+    page2 = anchor_page2 + days_diff * 2
+
+    def wrap(page):
+        if page <= 0:
+            while page <= 0:
+                page += total_pages
+        elif page > total_pages:
+            page = ((page - 1) % total_pages) + 1
+        return page
+
+    page1 = wrap(page1)
+    page2 = wrap(page2)
+
+    logger.info(f"📖 Quran pages for {target_date}: {page1}-{page2}")
     return int(page1), int(page2)
 
 async def send_athkar(athkar_type):
@@ -286,12 +330,15 @@ async def send_athkar(athkar_type):
             logger.error(f"Retry also failed: {retry_error}")
 
 async def send_quran_pages():
-    logger.info("Entering send_quran_pages function")
-    page1, page2 = get_next_quran_pages()
+    logger.info("📖 Entering send_quran_pages function")
+    # Use today's date to get the correct pages for today
+    today = datetime.now(CAIRO_TZ).date()
+    page1, page2 = get_next_quran_pages_for_date(today)
     page_1_url = f"{QURAN_PAGES_URL}/photo_{page1}.jpg"
     page_2_url = f"{QURAN_PAGES_URL}/photo_{page2}.jpg"
     
-    logger.info(f"Quran page URLs: {page_1_url}, {page_2_url}")
+    logger.info(f"📖 Sending Quran pages {page1}-{page2} for {today}")
+    logger.info(f"📖 Page URLs: {page_1_url}, {page_2_url}")
     async with aiohttp.ClientSession() as session:
         for url in [page_1_url, page_2_url]:
             try:
@@ -427,7 +474,7 @@ async def schedule_tasks():
             })
         else:
             # Add both evening tasks for today
-            next_pages = get_next_quran_pages()
+            today_pages = get_next_quran_pages_for_date(today)
             DAILY_TASKS.extend([
                 {
                     'type': 'evening_athkar',
@@ -437,7 +484,7 @@ async def schedule_tasks():
                 {
                     'type': 'quran',
                     'time': quran_time,
-                    'description': f'📖 Quran Pages {next_pages[0]}-{next_pages[1]}'
+                    'description': f'📖 Quran Pages {today_pages[0]}-{today_pages[1]}'
                 }
             ])
 
@@ -481,14 +528,14 @@ async def schedule_tasks():
                     logger.info(f"Scheduled evening athkar for tomorrow: {evening_athkar_tomorrow}")
 
                 if 'quran' in tasks_for_tomorrow:
-                    # Calculate tomorrow's Quran pages
-                    tomorrow_pages = get_next_quran_pages()  # This already calculates based on tomorrow's date
+                    # Calculate tomorrow's Quran pages using tomorrow's date
+                    tomorrow_pages = get_next_quran_pages_for_date(tomorrow)
                     DAILY_TASKS.append({
                         'type': 'quran',
                         'time': quran_time_tomorrow,
                         'description': f'📖 Quran Pages {tomorrow_pages[0]}-{tomorrow_pages[1]}'
                     })
-                    logger.info(f"Scheduled quran for tomorrow: {quran_time_tomorrow}")
+                    logger.info(f"📖 Scheduled Quran pages {tomorrow_pages[0]}-{tomorrow_pages[1]} for {tomorrow}")
 
         # Schedule jobs
         for task in DAILY_TASKS:
@@ -537,8 +584,10 @@ async def test_telegram_connection():
 
 async def heartbeat():
     while True:
-        logger.info("Heartbeat: Bot is still running")
-        await asyncio.sleep(60)  # Every minute
+        now = datetime.now(CAIRO_TZ)
+        scheduled_count = len(DAILY_TASKS) if DAILY_TASKS else 0
+        logger.info(f"💓 Bot running | {now.strftime('%H:%M')} | {scheduled_count} tasks scheduled")
+        await asyncio.sleep(300)  # Every 5 minutes instead of every minute
 
 from aiohttp import web
 
@@ -562,19 +611,29 @@ async def log_status_message():
         if prayer_times:
             now = datetime.now(CAIRO_TZ)
             
-            # Create status message for logs only
-            status_msg = f"Bot Status Report - {today.strftime('%Y-%m-%d')} {now.strftime('%H:%M')}\n"
-            status_msg += f"Prayer times for {today.strftime('%Y-%m-%d')}:\n"
+            logger.info("=" * 50)
+            logger.info(f"📊 BOT STATUS REPORT - {today} {now.strftime('%H:%M')}")
+            logger.info("=" * 50)
             
+            logger.info("🕌 Prayer times:")
             for prayer, time in prayer_times.items():
                 if prayer in ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha']:
-                    status_msg += f"- {prayer}: {time}\n"
+                    logger.info(f"   {prayer}: {time}")
             
-            status_msg += "\nScheduled tasks:\n"
-            for task in sorted(DAILY_TASKS, key=lambda x: x['time']):
-                status_msg += f"- {task['description']} at {task['time'].strftime('%H:%M')}\n"
+            if DAILY_TASKS:
+                logger.info("📅 Scheduled tasks:")
+                for task in sorted(DAILY_TASKS, key=lambda x: x['time']):
+                    task_date = task['time'].strftime('%m/%d')
+                    task_time = task['time'].strftime('%H:%M')
+                    logger.info(f"   {task['description']} - {task_date} at {task_time}")
+            else:
+                logger.info("📅 No tasks scheduled")
             
-            logger.info(status_msg)
+            # Show today's Quran pages
+            today_pages = get_next_quran_pages()
+            logger.info(f"📖 Today's Quran pages: {today_pages[0]}-{today_pages[1]}")
+            
+            logger.info("=" * 50)
     except Exception as e:
         logger.error(f"Error creating status log: {e}")
 
