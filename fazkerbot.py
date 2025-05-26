@@ -14,11 +14,17 @@ TOKEN = os.environ['TELEGRAM_BOT_TOKEN']
 CHAT_ID = os.environ['TELEGRAM_CHAT_ID']
 CAIRO_TZ = pytz.timezone('Africa/Cairo')
 API_URL = "https://api.aladhan.com/v1/timingsByCity"
+COORDINATES_API_URL = "https://api.aladhan.com/v1/timings"
 API_PARAMS = {'city': 'Cairo', 'country': 'Egypt', 'method': 3}
 
-GITHUB_RAW_URL = "https://raw.githubusercontent.com/elsisiem/muthaker-bot/master"
-QURAN_PAGES_URL = f"{GITHUB_RAW_URL}/%D8%A7%D9%84%D9%85%D8%B5%D8%AD%D9%81"
-ATHKAR_URL = f"{GITHUB_RAW_URL}/%D8%A7%D9%84%D8%A3%D8%B0%D9%83%D8%A7%D8%B1"
+# Fallback prayer times for Cairo (approximate times that can be used when API fails)
+FALLBACK_PRAYER_TIMES = {
+    'Fajr': '04:30',
+    'Dhuhr': '12:00',
+    'Asr': '16:30',
+    'Maghrib': '19:00',
+    'Isha': '20:30'
+}
 
 # Setup logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -28,26 +34,128 @@ logger = logging.getLogger(__name__)
 bot = Bot(TOKEN)
 scheduler = AsyncIOScheduler(timezone=CAIRO_TZ)
 
-async def fetch_prayer_times():
+async def validate_api_response(data, requested_date):
+    """Validate that API returned data for the correct date"""
     try:
+        api_date_str = data.get('data', {}).get('date', {}).get('readable')
+        gregorian_date = data.get('data', {}).get('date', {}).get('gregorian', {}).get('date')
+        
+        if not api_date_str or not gregorian_date:
+            logger.warning("API response missing date information")
+            return False
+        
+        # Parse the gregorian date (format: DD-MM-YYYY)
+        try:
+            api_date = datetime.strptime(gregorian_date, '%d-%m-%Y').date()
+            if api_date != requested_date:
+                logger.error(f"API date mismatch: requested {requested_date}, got {api_date}")
+                return False
+        except ValueError as e:
+            logger.error(f"Could not parse API gregorian date '{gregorian_date}': {e}")
+            return False
+        
+        logger.info(f"API response validated: correct date {requested_date}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error validating API response: {e}")
+        return False
+
+async def fetch_prayer_times_with_fallback(target_date=None):
+    """Fetch prayer times with multiple API attempts and fallback"""
+    if target_date is None:
+        target_date = datetime.now(CAIRO_TZ).date()
+    
+    date_str = target_date.strftime('%d-%m-%Y')
+    logger.info(f"Attempting to fetch prayer times for {date_str}")
+    
+    # Try city-based API first
+    timings = await try_city_api(target_date, date_str)
+    if timings:
+        return timings
+    
+    # Try coordinates API as backup
+    timings = await try_coordinates_api(target_date, date_str)
+    if timings:
+        return timings
+    
+    # If both APIs fail, use fallback times with warning
+    logger.warning(f"All APIs failed for {date_str}, using fallback prayer times")
+    return FALLBACK_PRAYER_TIMES
+
+async def try_city_api(target_date, date_str):
+    """Try the city-based API"""
+    try:
+        params = {
+            'city': 'Cairo', 
+            'country': 'Egypt', 
+            'method': 3,
+            'date': date_str
+        }
+        
         async with aiohttp.ClientSession() as session:
-            async with session.get(API_URL, params=API_PARAMS) as response:
+            async with session.get(API_URL, params=params, timeout=10) as response:
                 if response.status != 200:
-                    logger.error(f"API request failed with status {response.status}")
+                    logger.error(f"City API failed with status {response.status}")
                     return None
                     
                 data = await response.json()
-                timings = data.get('data', {}).get('timings')
                 
-                if not timings or not all(prayer in timings for prayer in ['Fajr', 'Asr']):
-                    logger.error("Missing required prayer times in API response")
+                # Validate response date
+                if not await validate_api_response(data, target_date):
+                    logger.error("City API returned incorrect date")
                     return None
                 
-                logger.info(f"Successfully fetched prayer times: {timings}")
+                timings = data.get('data', {}).get('timings')
+                if not timings or not all(prayer in timings for prayer in ['Fajr', 'Asr']):
+                    logger.error("City API missing required prayer times")
+                    return None
+                
+                logger.info(f"City API success for {date_str}")
                 return timings
+                
     except Exception as e:
-        logger.error(f"Error fetching prayer times: {e}")
+        logger.error(f"City API error for {date_str}: {e}")
         return None
+
+async def try_coordinates_api(target_date, date_str):
+    """Try the coordinates-based API as backup"""
+    try:
+        params = {
+            'latitude': 30.0444,  # Cairo coordinates
+            'longitude': 31.2357,
+            'method': 3,
+            'date': date_str
+        }
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(COORDINATES_API_URL, params=params, timeout=10) as response:
+                if response.status != 200:
+                    logger.error(f"Coordinates API failed with status {response.status}")
+                    return None
+                    
+                data = await response.json()
+                
+                # Validate response date
+                if not await validate_api_response(data, target_date):
+                    logger.error("Coordinates API returned incorrect date")
+                    return None
+                
+                timings = data.get('data', {}).get('timings')
+                if not timings or not all(prayer in timings for prayer in ['Fajr', 'Asr']):
+                    logger.error("Coordinates API missing required prayer times")
+                    return None
+                
+                logger.info(f"Coordinates API success for {date_str}")
+                return timings
+                
+    except Exception as e:
+        logger.error(f"Coordinates API error for {date_str}: {e}")
+        return None
+
+async def fetch_prayer_times(target_date=None):
+    """Main function to fetch prayer times - updated to use new fallback system"""
+    return await fetch_prayer_times_with_fallback(target_date)
 
 async def send_message(chat_id, text, parse_mode='HTML'):
     try:
@@ -100,10 +208,10 @@ async def find_previous_athkar(chat_id):
 def get_next_quran_pages():
     """Calculate next Quran pages based on anchor date"""
     logger.info("Calculating next Quran pages based on new anchor")
-    # Modified anchor to align with April 4th, 2025 target
-    anchor_date = datetime(2025, 4, 4).date()  # New anchor date: April 4th
-    anchor_page1 = 500  # Anchor page
-    anchor_page2 = 501  # Anchor page
+    # Recalibrated anchor to align with May 27th, 2025 target (pages 2-3)
+    anchor_date = datetime(2025, 5, 27).date()  # New anchor date: May 27th, 2025
+    anchor_page1 = 2  # Anchor page
+    anchor_page2 = 3  # Anchor page
     total_pages = 604  # Maximum page number
 
     today = datetime.now(CAIRO_TZ).date()
@@ -218,22 +326,37 @@ DAILY_TASKS = []  # Global list to store all scheduled tasks for the day
 
 async def schedule_tasks():
     try:
-        prayer_times = await fetch_prayer_times()
-        if not prayer_times:
-            logger.error("Failed to fetch prayer times, cannot proceed with scheduling")
-            return
-
+        logger.info("Starting task scheduling process...")
+        
         global DAILY_TASKS
         DAILY_TASKS.clear()
         
         now = datetime.now(CAIRO_TZ)
         today = now.date()
         tomorrow = today + timedelta(days=1)
+        
+        logger.info(f"Current time: {now}")
+        logger.info(f"Today: {today}")
+        logger.info(f"Tomorrow: {tomorrow}")
 
-        def get_prayer_time(prayer, for_tomorrow=False):
-            target_date = tomorrow if for_tomorrow else today
+        # Fetch prayer times for today with new fallback system
+        prayer_times_today = await fetch_prayer_times(today)
+        if not prayer_times_today:
+            logger.error("Failed to fetch today's prayer times even with fallback, using conservative scheduling")
+            # Use conservative fallback scheduling
+            await schedule_fallback_tasks(now, today, tomorrow)
+            return
+
+        logger.info("Today's prayer times fetched successfully")
+        
+        # Log prayer times for verification
+        for prayer, time in prayer_times_today.items():
+            if prayer in ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha']:
+                logger.info(f"  {prayer}: {time}")
+
+        def get_prayer_time(prayer, target_date, prayer_times_data):
             try:
-                time_str = prayer_times[prayer]
+                time_str = prayer_times_data[prayer]
                 if not time_str or len(time_str.split(':')) != 2:
                     logger.error(f"Invalid time format for {prayer}: {time_str}")
                     return None
@@ -241,72 +364,127 @@ async def schedule_tasks():
                 hour, minute = map(int, time_str.split(':'))
                 prayer_time = datetime.combine(target_date, datetime.min.time().replace(hour=hour, minute=minute))
                 localized_time = CAIRO_TZ.localize(prayer_time)
-                logger.info(f"Parsed {prayer} time: {localized_time}")
+                logger.info(f"Parsed {prayer} time for {target_date}: {localized_time}")
                 return localized_time
             except Exception as e:
-                logger.error(f"Error parsing prayer time for {prayer}: {e}")
+                logger.error(f"Error parsing prayer time for {prayer} on {target_date}: {e}")
                 return None
 
-        # Calculate prayer times
-        fajr_time = get_prayer_time('Fajr')
-        asr_time = get_prayer_time('Asr')
+        # Calculate today's prayer times
+        fajr_time_today = get_prayer_time('Fajr', today, prayer_times_today)
+        asr_time_today = get_prayer_time('Asr', today, prayer_times_today)
         
-        if not fajr_time or not asr_time:
-            logger.error("Critical prayer times are invalid, cannot schedule tasks")
+        if not fajr_time_today or not asr_time_today:
+            logger.error("Critical prayer times are invalid for today, cannot schedule tasks")
             return
 
-        logger.info(f"Using prayer times - Fajr: {fajr_time}, Asr: {asr_time}")
+        logger.info(f"Using today's prayer times - Fajr: {fajr_time_today}, Asr: {asr_time_today}")
         
-        # Calculate athkar times
-        morning_athkar_time = fajr_time + timedelta(minutes=35)
-        evening_athkar_time = asr_time + timedelta(minutes=35)
-        quran_time = asr_time + timedelta(minutes=45)
+        # Calculate today's task times
+        morning_athkar_time = fajr_time_today + timedelta(minutes=35)
+        evening_athkar_time = asr_time_today + timedelta(minutes=30)
+        quran_time = evening_athkar_time + timedelta(minutes=10)
 
-        # Verify calculated times are valid
-        if not all([morning_athkar_time, evening_athkar_time, quran_time]):
-            logger.error("Failed to calculate valid task times")
-            return
-
-        logger.info(f"Initial calculated times:")
+        logger.info(f"Initial calculated times for today:")
         logger.info(f"Morning Athkar: {morning_athkar_time}")
         logger.info(f"Evening Athkar: {evening_athkar_time}")
         logger.info(f"Quran time: {quran_time}")
 
-        # If morning athkar time has passed, schedule for tomorrow with fresh prayer times
-        if morning_athkar_time <= now:
-            fajr_tomorrow = get_prayer_time('Fajr', True)
-            if not fajr_tomorrow:
-                logger.error("Failed to get tomorrow's Fajr time")
-                return
-            morning_athkar_time = fajr_tomorrow + timedelta(minutes=35)
-            logger.info(f"Rescheduled morning athkar for tomorrow: {morning_athkar_time}")
+        # Check if we need tomorrow's prayer times
+        need_tomorrow_times = False
+        tasks_for_tomorrow = []
 
-        # Add morning athkar task
-        DAILY_TASKS.append({
-            'type': 'morning_athkar',
-            'time': morning_athkar_time,
-            'description': '🌅 Morning Athkar'
-        })
-        
-        # Only move evening tasks to tomorrow if both have passed
-        if evening_athkar_time <= now and quran_time <= now:
-            evening_athkar_time = get_prayer_time('Asr', True) + timedelta(minutes=35)
-            quran_time = get_prayer_time('Asr', True) + timedelta(minutes=45)
-        
-        # Add evening tasks
-        next_pages = get_next_quran_pages()
-        DAILY_TASKS.extend([
-            {
+        # Handle morning athkar scheduling
+        if morning_athkar_time <= now:
+            need_tomorrow_times = True
+            tasks_for_tomorrow.append('morning_athkar')
+            logger.info("Morning athkar time has passed, will schedule for tomorrow")
+        else:
+            DAILY_TASKS.append({
+                'type': 'morning_athkar',
+                'time': morning_athkar_time,
+                'description': '🌅 Morning Athkar'
+            })
+
+        # Handle evening tasks scheduling
+        if evening_athkar_time <= now:
+            need_tomorrow_times = True
+            tasks_for_tomorrow.extend(['evening_athkar', 'quran'])
+            logger.info("Evening athkar time has passed, will schedule evening tasks for tomorrow")
+        elif quran_time <= now:
+            need_tomorrow_times = True
+            tasks_for_tomorrow.append('quran')
+            logger.info("Quran time has passed, will schedule for tomorrow")
+            # Add today's evening athkar
+            DAILY_TASKS.append({
                 'type': 'evening_athkar',
                 'time': evening_athkar_time,
                 'description': '🌙 Evening Athkar'
-            },
-            {
-                'type': 'quran',
-                'time': quran_time,
-                'description': f'📖 Quran Pages {next_pages[0]}-{next_pages[1]}'
-            }
-        ])
+            })
+        else:
+            # Add both evening tasks for today
+            next_pages = get_next_quran_pages()
+            DAILY_TASKS.extend([
+                {
+                    'type': 'evening_athkar',
+                    'time': evening_athkar_time,
+                    'description': '🌙 Evening Athkar'
+                },
+                {
+                    'type': 'quran',
+                    'time': quran_time,
+                    'description': f'📖 Quran Pages {next_pages[0]}-{next_pages[1]}'
+                }
+            ])
+
+        # Fetch tomorrow's prayer times if needed
+        if need_tomorrow_times:
+            logger.info("Fetching tomorrow's prayer times...")
+            prayer_times_tomorrow = await fetch_prayer_times(tomorrow)
+            if not prayer_times_tomorrow:
+                logger.error("Failed to fetch tomorrow's prayer times")
+                return
+
+            fajr_time_tomorrow = get_prayer_time('Fajr', tomorrow, prayer_times_tomorrow)
+            asr_time_tomorrow = get_prayer_time('Asr', tomorrow, prayer_times_tomorrow)
+            
+            if not fajr_time_tomorrow or not asr_time_tomorrow:
+                logger.error("Critical prayer times are invalid for tomorrow")
+                return
+
+            logger.info(f"Tomorrow's prayer times - Fajr: {fajr_time_tomorrow}, Asr: {asr_time_tomorrow}")
+
+            # Schedule tomorrow's tasks
+            if 'morning_athkar' in tasks_for_tomorrow:
+                morning_athkar_tomorrow = fajr_time_tomorrow + timedelta(minutes=35)
+                DAILY_TASKS.append({
+                    'type': 'morning_athkar',
+                    'time': morning_athkar_tomorrow,
+                    'description': '🌅 Morning Athkar'
+                })
+                logger.info(f"Scheduled morning athkar for tomorrow: {morning_athkar_tomorrow}")
+
+            if 'evening_athkar' in tasks_for_tomorrow or 'quran' in tasks_for_tomorrow:
+                evening_athkar_tomorrow = asr_time_tomorrow + timedelta(minutes=30)
+                quran_time_tomorrow = evening_athkar_tomorrow + timedelta(minutes=10)
+                
+                if 'evening_athkar' in tasks_for_tomorrow:
+                    DAILY_TASKS.append({
+                        'type': 'evening_athkar',
+                        'time': evening_athkar_tomorrow,
+                        'description': '🌙 Evening Athkar'
+                    })
+                    logger.info(f"Scheduled evening athkar for tomorrow: {evening_athkar_tomorrow}")
+
+                if 'quran' in tasks_for_tomorrow:
+                    # Calculate tomorrow's Quran pages
+                    tomorrow_pages = get_next_quran_pages()  # This already calculates based on tomorrow's date
+                    DAILY_TASKS.append({
+                        'type': 'quran',
+                        'time': quran_time_tomorrow,
+                        'description': f'📖 Quran Pages {tomorrow_pages[0]}-{tomorrow_pages[1]}'
+                    })
+                    logger.info(f"Scheduled quran for tomorrow: {quran_time_tomorrow}")
 
         # Schedule jobs
         for task in DAILY_TASKS:
@@ -375,14 +553,14 @@ def format_time_until(target_time, now):
 async def log_status_message():
     """Log status message without sending to channel"""
     try:
-        prayer_times = await fetch_prayer_times()
+        today = datetime.now(CAIRO_TZ).date()
+        prayer_times = await fetch_prayer_times(today)
         if prayer_times:
             now = datetime.now(CAIRO_TZ)
-            today = now.date()
             
             # Create status message for logs only
             status_msg = f"Bot Status Report - {today.strftime('%Y-%m-%d')} {now.strftime('%H:%M')}\n"
-            status_msg += "Prayer times today:\n"
+            status_msg += f"Prayer times for {today.strftime('%Y-%m-%d')}:\n"
             
             for prayer, time in prayer_times.items():
                 if prayer in ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha']:
@@ -407,10 +585,12 @@ async def main():
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
-    logger.info(f"Web server started on port {port}")
-
-    # Test Telegram connection and log initial status
+    logger.info(f"Web server started on port {port}")    # Test Telegram connection and prayer times
     await test_telegram_connection()
+    prayer_test_result = await test_prayer_times()
+    if not prayer_test_result:
+        logger.warning("Prayer times test failed - scheduling may not work correctly")
+    
     await log_status_message()  # Log status without sending to channel
     
     # Start the scheduler
@@ -448,4 +628,28 @@ if __name__ == "__main__":
         logger.critical(f"Critical error in main execution: {e}", exc_info=True)
     finally:
         scheduler.shutdown()
-        connection_pool.closeall()
+
+async def test_prayer_times():
+    """Test function to verify prayer times API and parsing"""
+    logger.info("Testing prayer times API with new fallback system...")
+    
+    today = datetime.now(CAIRO_TZ).date()
+    tomorrow = today + timedelta(days=1)
+    
+    # Test today's prayer times
+    prayer_times_today = await fetch_prayer_times(today)
+    if not prayer_times_today:
+        logger.error("Failed to fetch today's prayer times in test")
+        return False
+    else:
+        logger.info(f"Today's prayer times: Fajr={prayer_times_today.get('Fajr')}, Asr={prayer_times_today.get('Asr')}")
+    
+    # Test tomorrow's prayer times
+    prayer_times_tomorrow = await fetch_prayer_times(tomorrow)
+    if not prayer_times_tomorrow:
+        logger.error("Failed to fetch tomorrow's prayer times in test")
+        return False
+    else:
+        logger.info(f"Tomorrow's prayer times: Fajr={prayer_times_tomorrow.get('Fajr')}, Asr={prayer_times_tomorrow.get('Asr')}")
+    
+    return True
