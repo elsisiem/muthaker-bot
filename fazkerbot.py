@@ -17,6 +17,10 @@ API_URL = "https://api.aladhan.com/v1/timingsByCity"
 COORDINATES_API_URL = "https://api.aladhan.com/v1/timings"
 API_PARAMS = {'city': 'Cairo', 'country': 'Egypt', 'method': 3}
 
+# Add missing constants
+ATHKAR_URL = "https://github.com/hatem-sayyeda/athkar-images/raw/main"
+QURAN_PAGES_URL = "https://github.com/hatem-sayyeda/quran-pages/raw/main"
+
 # Fallback prayer times for Cairo (approximate times that can be used when API fails)
 FALLBACK_PRAYER_TIMES = {
     'Fajr': '04:30',
@@ -574,6 +578,31 @@ async def log_status_message():
     except Exception as e:
         logger.error(f"Error creating status log: {e}")
 
+async def test_prayer_times():
+    """Test function to verify prayer times API and parsing"""
+    logger.info("Testing prayer times API with new fallback system...")
+    
+    today = datetime.now(CAIRO_TZ).date()
+    tomorrow = today + timedelta(days=1)
+    
+    # Test today's prayer times
+    prayer_times_today = await fetch_prayer_times(today)
+    if not prayer_times_today:
+        logger.error("Failed to fetch today's prayer times in test")
+        return False
+    else:
+        logger.info(f"Today's prayer times: Fajr={prayer_times_today.get('Fajr')}, Asr={prayer_times_today.get('Asr')}")
+    
+    # Test tomorrow's prayer times
+    prayer_times_tomorrow = await fetch_prayer_times(tomorrow)
+    if not prayer_times_tomorrow:
+        logger.error("Failed to fetch tomorrow's prayer times in test")
+        return False
+    else:
+        logger.info(f"Tomorrow's prayer times: Fajr={prayer_times_tomorrow.get('Fajr')}, Asr={prayer_times_tomorrow.get('Asr')}")
+    
+    return True
+
 async def main():
     # Setup web app
     app = web.Application()
@@ -585,7 +614,9 @@ async def main():
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
-    logger.info(f"Web server started on port {port}")    # Test Telegram connection and prayer times
+    logger.info(f"Web server started on port {port}")
+    
+    # Test Telegram connection and prayer times
     await test_telegram_connection()
     prayer_test_result = await test_prayer_times()
     if not prayer_test_result:
@@ -627,29 +658,8 @@ if __name__ == "__main__":
     except Exception as e:
         logger.critical(f"Critical error in main execution: {e}", exc_info=True)
     finally:
-        scheduler.shutdown()
-
-async def test_prayer_times():
-    """Test function to verify prayer times API and parsing"""
-    logger.info("Testing prayer times API with new fallback system...")
-    
-    today = datetime.now(CAIRO_TZ).date()
-    tomorrow = today + timedelta(days=1)
-    
-    # Test today's prayer times
-    prayer_times_today = await fetch_prayer_times(today)
-    if not prayer_times_today:
-        logger.error("Failed to fetch today's prayer times in test")
-        return False
-    else:
-        logger.info(f"Today's prayer times: Fajr={prayer_times_today.get('Fajr')}, Asr={prayer_times_today.get('Asr')}")
-    
-    # Test tomorrow's prayer times
-    prayer_times_tomorrow = await fetch_prayer_times(tomorrow)
-    if not prayer_times_tomorrow:
-        logger.error("Failed to fetch tomorrow's prayer times in test")
-        return False
-    else:
-        logger.info(f"Tomorrow's prayer times: Fajr={prayer_times_tomorrow.get('Fajr')}, Asr={prayer_times_tomorrow.get('Asr')}")
-    
-    return True
+        try:
+            if scheduler.running:
+                scheduler.shutdown()
+        except Exception as e:
+            logger.error(f"Error shutting down scheduler: {e}")
