@@ -17,9 +17,10 @@ API_URL = "https://api.aladhan.com/v1/timingsByCity"
 COORDINATES_API_URL = "https://api.aladhan.com/v1/timings"
 API_PARAMS = {'city': 'Cairo', 'country': 'Egypt', 'method': 3}
 
-# Add missing constants
-ATHKAR_URL = "https://github.com/hatem-sayyeda/athkar-images/raw/main"
-QURAN_PAGES_URL = "https://github.com/hatem-sayyeda/quran-pages/raw/main"
+# Updated image URLs to use the working GitHub repository
+GITHUB_RAW_URL = "https://raw.githubusercontent.com/elsisiem/muthaker-bot/master"
+QURAN_PAGES_URL = f"{GITHUB_RAW_URL}/%D8%A7%D9%84%D9%85%D8%B5%D8%AD%D9%81"
+ATHKAR_URL = f"{GITHUB_RAW_URL}/%D8%A7%D9%84%D8%A3%D8%Bذ%D9%83%D8%A7%D8%B1"
 
 # Fallback prayer times for Cairo (approximate times that can be used when API fails)
 FALLBACK_PRAYER_TIMES = {
@@ -281,30 +282,30 @@ def get_next_quran_pages_for_date(target_date):
     return int(page1), int(page2)
 
 async def send_athkar(athkar_type):
-    """Send athkar without a caption and with cyclic deletion of the opposite type"""
-    logger.info(f"Sending {athkar_type} Athkar")
+    """Send athkar without deletion logic"""
+    logger.info(f"🌅 Sending {athkar_type} Athkar")
     
-    # Remove caption from athkar messages
+    # No caption for athkar messages
     caption = None  
     image_url = f"{ATHKAR_URL}/{'أذكار_الصباح' if athkar_type == 'morning' else 'أذكار_المساء'}.jpg"
     
-    # For deletion, instead of checking caption text, we check if the image URL contains the opposite identifier.
-    # (This assumes that the image URLs contain 'أذكار_الصباح' or 'أذكار_المساء'.)
-    delete_identifier = "أذكار_المساء" if athkar_type == "morning" else "أذكار_الصباح"
+    # Validate URL first
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(image_url, timeout=10) as response:
+                if response.status != 200:
+                    logger.error(f"❌ Athkar image not accessible: {image_url} (status {response.status})")
+                    return
+                content = await response.content.read(10)
+                if not content.startswith(b'\xff\xd8'):
+                    logger.error(f"❌ Invalid image format for athkar: {image_url}")
+                    return
+    except Exception as e:
+        logger.error(f"❌ Error validating athkar image URL {image_url}: {e}")
+        return
     
     try:
-        messages = await bot.get_chat_history(chat_id=CHAT_ID, limit=100)
-        for message in messages:
-            if hasattr(message, 'caption'):
-                # If a caption exists (or is None) check the image URL if available in message.photo data.
-                # Since messages sent without caption might not have a caption field, 
-                # you might need to rely on other metadata (this is a placeholder logic).
-                if message.caption and delete_identifier in message.caption:
-                    try:
-                        await bot.delete_message(chat_id=CHAT_ID, message_id=message.message_id)
-                        logger.info(f"Deleted message {message.message_id} containing {delete_identifier}")
-                    except Exception as e:
-                        logger.error(f"Failed to delete message {message.message_id}: {e}")
+        # Send the athkar image
         new_message = await bot.send_photo(
             chat_id=CHAT_ID,
             photo=image_url,
@@ -312,12 +313,13 @@ async def send_athkar(athkar_type):
         )
 
         if new_message:
-            logger.info(f"Successfully sent new {athkar_type} athkar: {new_message.message_id}")
+            logger.info(f"✅ Successfully sent {athkar_type} athkar: {new_message.message_id}")
         else:
-            logger.error("Failed to send new athkar message")
+            logger.error(f"❌ Failed to send {athkar_type} athkar message")
             
     except Exception as e:
-        logger.error(f"Error in send_athkar: {e}", exc_info=True)
+        logger.error(f"❌ Error in send_athkar: {e}")
+        # Retry once after a short delay
         try:
             await asyncio.sleep(5)
             new_message = await bot.send_photo(
@@ -325,9 +327,9 @@ async def send_athkar(athkar_type):
                 photo=image_url,
                 caption=caption
             )
-            logger.info("Successfully sent athkar on retry")
+            logger.info(f"✅ Successfully sent {athkar_type} athkar on retry: {new_message.message_id}")
         except Exception as retry_error:
-            logger.error(f"Retry also failed: {retry_error}")
+            logger.error(f"❌ Retry also failed for {athkar_type} athkar: {retry_error}")
 
 async def send_quran_pages():
     logger.info("📖 Entering send_quran_pages function")
@@ -339,39 +341,41 @@ async def send_quran_pages():
     
     logger.info(f"📖 Sending Quran pages {page1}-{page2} for {today}")
     logger.info(f"📖 Page URLs: {page_1_url}, {page_2_url}")
+    
+    # Validate URLs first
     async with aiohttp.ClientSession() as session:
-        for url in [page_1_url, page_2_url]:
+        for i, url in enumerate([page_1_url, page_2_url], 1):
             try:
-                async with session.get(url) as response:
+                async with session.get(url, timeout=10) as response:
                     if response.status != 200:
-                        logger.error(f"Image not found: {url}")
+                        logger.error(f"❌ Quran page {i} not found: {url} (status {response.status})")
                         return
                     content = await response.content.read(10)
                     if not content.startswith(b'\xff\xd8'):
-                        logger.error(f"URL does not point to a valid JPEG image: {url}")
+                        logger.error(f"❌ Invalid image format for page {i}: {url}")
                         return
+                    logger.info(f"✅ Page {i} validated: {url}")
             except Exception as e:
-                logger.error(f"Error checking image URL {url}: {e}")
+                logger.error(f"❌ Error validating Quran page {i} URL {url}: {e}")
                 return
     
     media = [
         {"type": "photo", "media": page_1_url},
-        # Change caption text for Quran pages: remove hashtag so it appears as plain text.
         {"type": "photo", "media": page_2_url, "caption": "ورد اليوم"}
     ]
     
     try:
-        logger.info("Attempting to send media group")
+        logger.info("📖 Attempting to send Quran media group")
         message_ids = await send_media_group(CHAT_ID, media)
         
         if message_ids:
-            logger.info(f"Successfully sent media group. Message IDs: {message_ids}")
+            logger.info(f"✅ Successfully sent Quran pages {page1}-{page2}. Message IDs: {message_ids}")
         else:
-            logger.error("Failed to send Quran pages: No message IDs returned")
+            logger.error(f"❌ Failed to send Quran pages {page1}-{page2}: No message IDs returned")
     except Exception as e:
-        logger.error(f"Error sending Quran pages: {e}")
+        logger.error(f"❌ Error sending Quran pages {page1}-{page2}: {e}")
     finally:
-        logger.info("Exiting send_quran_pages function")
+        logger.info("📖 Exiting send_quran_pages function")
 
 DAILY_TASKS = []  # Global list to store all scheduled tasks for the day
 
