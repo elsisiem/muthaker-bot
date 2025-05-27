@@ -370,15 +370,23 @@ async def send_athkar(athkar_type):
         except Exception as retry_error:
             logger.error(f"❌ Retry also failed for {athkar_type} athkar: {retry_error}")
 
-async def send_quran_pages():
+async def send_quran_pages(target_date=None):
+    """Send Quran pages for a specific date"""
     logger.info("📖 Entering send_quran_pages function")
-    # Use today's date to get the correct pages for today
-    today = datetime.now(CAIRO_TZ).date()
-    page1, page2 = get_next_quran_pages_for_date(today)
+    
+    # Use the target date if provided, otherwise use today's date
+    if target_date is None:
+        target_date = datetime.now(CAIRO_TZ).date()
+    else:
+        # If target_date is a datetime object, extract the date
+        if isinstance(target_date, datetime):
+            target_date = target_date.date()
+    
+    page1, page2 = get_next_quran_pages_for_date(target_date)
     page_1_url = f"{QURAN_PAGES_URL}/photo_{page1}.jpg"
     page_2_url = f"{QURAN_PAGES_URL}/photo_{page2}.jpg"
     
-    logger.info(f"📖 Sending Quran pages {page1}-{page2} for {today}")
+    logger.info(f"📖 Sending Quran pages {page1}-{page2} for {target_date}")
     logger.info(f"📖 Page URLs: {page_1_url}, {page_2_url}")
     
     # Validate URLs first
@@ -601,10 +609,12 @@ async def schedule_tasks():
                     misfire_grace_time=300
                 )
             elif task['type'] == 'quran':
+                # Pass the exact date to ensure correct pages are sent
+                task_date = task['time'].date()
                 scheduler.add_job(
                     send_quran_pages,
                     trigger=DateTrigger(run_date=task['time'], timezone=CAIRO_TZ),
-                    args=[],
+                    args=[task_date],  # Pass the specific date
                     id=f"quran_pages_{task['time'].strftime('%Y%m%d')}",
                     replace_existing=True,
                     misfire_grace_time=300
