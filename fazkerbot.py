@@ -104,17 +104,20 @@ async def fetch_prayer_times_with_fallback(target_date=None):
 async def try_city_api(target_date, date_str):
     """Try the city-based API"""
     try:
+        # Build URL with date as path parameter
+        api_url_with_date = f"{API_URL}/{date_str}"
         params = {
             'city': 'Cairo', 
             'country': 'Egypt', 
-            'method': 3,
-            'date': date_str
+            'method': 3  # Muslim World League
         }
         
-        logger.info(f"🔄 Trying city API for {date_str} with params: {params}")
+        logger.info(f"🔄 Trying city API for {date_str}")
+        logger.info(f"🌐 URL: {api_url_with_date}")
+        logger.info(f"🔧 Params: {params}")
         
         async with aiohttp.ClientSession() as session:
-            async with session.get(API_URL, params=params, timeout=15) as response:
+            async with session.get(api_url_with_date, params=params, timeout=15) as response:
                 logger.info(f"🌐 City API response status: {response.status}")
                 
                 if response.status != 200:
@@ -123,17 +126,17 @@ async def try_city_api(target_date, date_str):
                     return None
                     
                 data = await response.json()
-                logger.info(f"📅 City API response data structure: {list(data.keys()) if data else 'None'}")
+                logger.info(f"📅 City API response received successfully")
                 
                 # Log more details about the response
-                if 'data' in data:
-                    date_info = data.get('data', {}).get('date', {})
-                    logger.info(f"📅 API returned date info: {date_info}")
+                if 'data' in data and 'date' in data['data']:
+                    date_info = data['data']['date']
+                    logger.info(f"📅 API returned date: {date_info.get('readable', 'N/A')}")
+                    logger.info(f"📅 API gregorian date: {date_info.get('gregorian', {}).get('date', 'N/A')}")
                 
                 # Validate response date with relaxed validation
                 if not await validate_api_response(data, target_date):
                     logger.warning("City API date validation failed, but continuing...")
-                    # Don't return None here, continue with the data
                 
                 timings = data.get('data', {}).get('timings')
                 if not timings:
@@ -144,7 +147,8 @@ async def try_city_api(target_date, date_str):
                     logger.error(f"City API missing required prayers. Available: {list(timings.keys())}")
                     return None
                 
-                logger.info(f"✅ City API success for {date_str}. Fajr: {timings.get('Fajr')}, Asr: {timings.get('Asr')}")
+                logger.info(f"✅ City API success for {date_str}")
+                logger.info(f"🕌 Fajr: {timings.get('Fajr')}, Asr: {timings.get('Asr')}")
                 return timings
                 
     except Exception as e:
@@ -154,17 +158,20 @@ async def try_city_api(target_date, date_str):
 async def try_coordinates_api(target_date, date_str):
     """Try the coordinates-based API as backup"""
     try:
+        # Build URL with date as path parameter
+        api_url_with_date = f"{COORDINATES_API_URL}/{date_str}"
         params = {
             'latitude': 30.0444,  # Cairo coordinates
             'longitude': 31.2357,
-            'method': 3,
-            'date': date_str
+            'method': 3  # Muslim World League
         }
         
-        logger.info(f"🔄 Trying coordinates API for {date_str} with params: {params}")
+        logger.info(f"🔄 Trying coordinates API for {date_str}")
+        logger.info(f"🌐 URL: {api_url_with_date}")
+        logger.info(f"🔧 Params: {params}")
         
         async with aiohttp.ClientSession() as session:
-            async with session.get(COORDINATES_API_URL, params=params, timeout=15) as response:
+            async with session.get(api_url_with_date, params=params, timeout=15) as response:
                 logger.info(f"🌐 Coordinates API response status: {response.status}")
                 
                 if response.status != 200:
@@ -173,12 +180,11 @@ async def try_coordinates_api(target_date, date_str):
                     return None
                     
                 data = await response.json()
-                logger.info(f"📅 Coordinates API response data structure: {list(data.keys()) if data else 'None'}")
+                logger.info(f"📅 Coordinates API response received successfully")
                 
                 # Validate response date with relaxed validation
                 if not await validate_api_response(data, target_date):
                     logger.warning("Coordinates API date validation failed, but continuing...")
-                    # Don't return None here, continue with the data
                 
                 timings = data.get('data', {}).get('timings')
                 if not timings:
@@ -189,7 +195,8 @@ async def try_coordinates_api(target_date, date_str):
                     logger.error(f"Coordinates API missing required prayers. Available: {list(timings.keys())}")
                     return None
                 
-                logger.info(f"✅ Coordinates API success for {date_str}. Fajr: {timings.get('Fajr')}, Asr: {timings.get('Asr')}")
+                logger.info(f"✅ Coordinates API success for {date_str}")
+                logger.info(f"🕌 Fajr: {timings.get('Fajr')}, Asr: {timings.get('Asr')}")
                 return timings
                 
     except Exception as e:
