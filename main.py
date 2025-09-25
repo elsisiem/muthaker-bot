@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import os
+from aiohttp import web
 from fazkerbot import (
     bot as channel_bot,
     scheduler as channel_scheduler,
@@ -9,7 +11,7 @@ from fazkerbot import (
     schedule_tasks,
     heartbeat
 )
-from user_side import application as user_app, init_application
+from user_side import web_app
 
 # Setup detailed logging
 logging.basicConfig(
@@ -49,29 +51,23 @@ async def run_channel_bot():
     while True:
         await asyncio.sleep(60)
 
-async def run_user_interaction_bot():
-    """Run the user interaction bot."""
-    logger.info("👥 Starting user interaction bot...")
-
-    # Initialize user interaction system
-    await init_application()
-    logger.info("✅ User interaction system initialized")
-
-    # Start polling for user interactions using the current event loop
-    loop = asyncio.get_running_loop()
-    loop.create_task(user_app.run_polling(drop_pending_updates=True))
-    logger.info("✅ User interaction polling started")
-
 async def main():
     """Main function to run both bots concurrently."""
     try:
         logger.info("🎬 Starting combined bot system...")
 
-        # Run both bots concurrently
-        await asyncio.gather(
-            run_channel_bot(),
-            run_user_interaction_bot()
-        )
+        # Start the channel posting bot
+        asyncio.create_task(run_channel_bot())
+
+        # Start the web server for webhook handling
+        runner = web.AppRunner(web_app)
+        await runner.setup()
+        site = web.TCPSite(runner, "0.0.0.0", int(os.environ.get("PORT", 8080)))
+        await site.start()
+
+        # Keep the event loop running
+        while True:
+            await asyncio.sleep(3600)
     except Exception as e:
         logger.exception("💥 Fatal error in main execution")
         raise
