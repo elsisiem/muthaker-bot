@@ -26,7 +26,7 @@ from telegram.ext import (
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy import Column, Integer, String
+from sqlalchemy import Column, Integer, String, text
 
 from aiohttp import web
 
@@ -85,7 +85,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         # Ensure the user exists in database (create or fetch)
         async with async_session() as session:
             result = await session.execute(
-                "SELECT id FROM users WHERE telegram_id = :tid", {"tid": user_id}
+                text("SELECT id FROM users WHERE telegram_id = :tid"), {"tid": user_id}
             )
             user = result.first()
             if not user:
@@ -173,7 +173,7 @@ async def athkar_freq_receive(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_id = str(update.effective_user.id)
     async with async_session() as session:
         await session.execute(
-            "UPDATE users SET athkar_preferences = :prefs WHERE telegram_id = :tid",
+            text("UPDATE users SET athkar_preferences = :prefs WHERE telegram_id = :tid"),
             {"prefs": json.dumps(athkar_prefs), "tid": user_id}
         )
         await session.commit()
@@ -221,7 +221,7 @@ async def quran_config_receive(update: Update, context: ContextTypes.DEFAULT_TYP
     user_id = str(update.effective_user.id)
     async with async_session() as session:
         await session.execute(
-            "UPDATE users SET quran_settings = :settings WHERE telegram_id = :tid",
+            text("UPDATE users SET quran_settings = :settings WHERE telegram_id = :tid"),
             {"settings": json.dumps(quran_settings), "tid": user_id}
         )
         await session.commit()
@@ -247,7 +247,7 @@ async def sleep_config_receive(update: Update, context: ContextTypes.DEFAULT_TYP
     user_id = str(update.effective_user.id)
     async with async_session() as session:
         await session.execute(
-            "UPDATE users SET athkar_preferences = COALESCE(athkar_preferences, '{}') || :sleep_time::text WHERE telegram_id = :tid",
+            text("UPDATE users SET athkar_preferences = COALESCE(athkar_preferences, '{}') || :sleep_time::text WHERE telegram_id = :tid"),
             {"sleep_time": f'{{"sleep_time": "{sleep_time}"}}', "tid": user_id}
         )
         await session.commit()
@@ -279,7 +279,7 @@ async def city_config_receive(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_id = str(update.effective_user.id)
     async with async_session() as session:
         await session.execute(
-            "UPDATE users SET city = :city, country = :country, timezone = :tz WHERE telegram_id = :tid",
+            text("UPDATE users SET city = :city, country = :country, timezone = :tz WHERE telegram_id = :tid"),
             {"city": city, "country": country, "tz": timezone, "tid": user_id}
         )
         await session.commit()
