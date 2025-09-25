@@ -49,9 +49,8 @@ async def setup_webhook():
         return False
     finally:
         # Clean up
-        session = await bot.get_session()
-        if session:
-            await session.close()
+        if hasattr(bot, 'session') and bot.session:
+            await bot.session.close()
 
 if __name__ == "__main__":
     print("🔧 Setting up webhook for user interactions...")
