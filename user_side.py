@@ -349,8 +349,9 @@ async def init_application():
 
 # Define the webhook route
 async def webhook_handler(request):
-    update = await request.json()
-    await application.update_queue.put(Update.de_json(update, application.bot))
+    update_data = await request.json()
+    update = Update.de_json(update_data, application.bot)
+    await application.process_update(update)
     return web.Response(text="OK")
 
 # Initialize the application for webhook updates
