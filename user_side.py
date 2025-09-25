@@ -45,13 +45,13 @@ from db import (
 )
 
 from sqlalchemy import text
+from fazkerbot import scheduler
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize the scheduler
-scheduler = AsyncIOScheduler()
+# Initialize the scheduler (imported from fazkerbot)
 
 # Predefined Athkar list imported from athkar.py
 
@@ -156,7 +156,6 @@ async def init_application():
     try:
         await application.initialize()
         await init_db()
-        scheduler.start()
         await schedule_user_athkar()
 
         # Start scheduler
