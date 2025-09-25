@@ -65,9 +65,7 @@ async def combined_main():
         # Start user interaction polling with the SAME bot
         logger.info("👥 Starting user interaction polling (same bot)...")
         from user_side import application as user_app
-        user_polling_task = asyncio.create_task(
-            user_app.run_polling(drop_pending_updates=True)
-        )
+        await user_app.start_polling(drop_pending_updates=True)
         logger.info("✅ User interaction polling started")
         
         # Channel bot scheduling loop (from original fazkerbot main)
@@ -108,8 +106,6 @@ async def combined_main():
                 scheduler.shutdown()
             if 'heartbeat_task' in locals():
                 heartbeat_task.cancel()
-            if 'user_polling_task' in locals():
-                user_polling_task.cancel()
         except Exception as e:
             logger.error(f"Error during shutdown: {e}")
 
