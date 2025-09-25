@@ -30,8 +30,10 @@ from sqlalchemy import Column, Integer, String, text
 
 from aiohttp import web
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
 from user_bot.language import language_choice
-from user_bot.athkar import athkar_config_entry, athkar_receive, athkar_freq_choice, athkar_freq_receive, ATHKAR_LIST_AR, ATHKAR_LIST_EN
+from user_bot.athkar import athkar_config_entry, athkar_receive, athkar_freq_choice, athkar_freq_receive
 from user_bot.quran import quran_config_entry, quran_config_choice, quran_config_receive
 from user_bot.sleep import sleep_config_entry, sleep_config_receive
 from user_bot.city import city_config_entry, city_config_receive
@@ -57,6 +59,9 @@ engine = create_async_engine(DATABASE_URL, echo=True)
 Base = declarative_base()
 async_session = sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
+# Initialize the scheduler
+scheduler = AsyncIOScheduler()
+
 # Define a user preferences model.
 class User(Base):
     __tablename__ = "users"
@@ -71,6 +76,8 @@ class User(Base):
 
 # Conversation states
 LANGUAGE, MAIN_MENU, ATHKAR, ATHKAR_FREQ, QURAN_CHOICE, QURAN_DETAILS, SLEEP_TIME, CITY_INFO = range(8)
+
+# Predefined Athkar list imported from athkar.py
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start the configuration conversation."""
@@ -108,112 +115,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         await update.message.reply_text("An error occurred. Please try again with /start")
         return ConversationHandler.END
 
-# --- Quran Wird Configuration Flow ---
-async def quran_config_entry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Entry point for Quran Wird configuration."""
-    query = update.callback_query
-    await query.answer()
-    keyboard = [
-        [InlineKeyboardButton("Fixed Pages per Day", callback_data="quran_pages")],
-        [InlineKeyboardButton("Specific Juz’ (1-30)", callback_data="quran_juz")],
-        [InlineKeyboardButton("Specific Surah", callback_data="quran_surah")],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text("Choose your Quran recitation mode:", reply_markup=reply_markup)
-    return QURAN_CHOICE
-
-async def quran_config_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Process the Quran Wird choice and ask for details."""
-    query = update.callback_query
-    await query.answer()
-    choice = query.data  # "quran_pages", "quran_juz" or "quran_surah"
-    context.user_data["quran_mode"] = choice
-    if choice == "quran_pages":
-        await query.edit_message_text("Enter the number of pages you want to recite per day (e.g., 2):")
-    elif choice == "quran_juz":
-        await query.edit_message_text("Enter the Juz’ number (1-30):")
-    else:
-        await query.edit_message_text("Enter the Surah name or number:")
-    return QURAN_DETAILS
-
-async def quran_config_receive(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Receive Quran Wird configuration details and save to DB."""
-    detail = update.message.text.strip()
-    context.user_data["quran_detail"] = detail
-    import json
-    quran_settings = {
-        "mode": context.user_data.get("quran_mode"),
-        "detail": detail,
-        "last_recited": None
-    }
-    user_id = str(update.effective_user.id)
-    async with async_session() as session:
-        await session.execute(
-            text("UPDATE users SET quran_settings = :settings WHERE telegram_id = :tid"),
-            {"settings": json.dumps(quran_settings), "tid": user_id}
-        )
-        await session.commit()
-    await update.message.reply_text("Quran Wird settings saved successfully.")
-    return ConversationHandler.END
-
-# --- Sleep-Time Supplications Configuration Flow ---
-async def sleep_config_entry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Entry for sleep-time supplications: ask user for typical sleep time."""
-    query = update.callback_query
-    await query.answer()
-    await query.edit_message_text("Please enter your typical sleep time in HH:MM (24-hour format):")
-    return SLEEP_TIME
-
-async def sleep_config_receive(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Receive sleep time and update user configuration."""
-    sleep_time = update.message.text.strip()
-    try:
-        datetime.strptime(sleep_time, "%H:%M")
-    except Exception:
-        await update.message.reply_text("Invalid format. Please enter time as HH:MM (e.g., 23:30).")
-        return SLEEP_TIME
-    user_id = str(update.effective_user.id)
-    async with async_session() as session:
-        await session.execute(
-            text("UPDATE users SET athkar_preferences = COALESCE(athkar_preferences, '{}') || :sleep_time::text WHERE telegram_id = :tid"),
-            {"sleep_time": f'{{"sleep_time": "{sleep_time}"}}', "tid": user_id}
-        )
-        await session.commit()
-    await update.message.reply_text("Sleep-time supplications configuration saved.")
-    return ConversationHandler.END
-
-# --- City/Timezone Configuration Flow ---
-async def city_config_entry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Entry for City/Timezone configuration: ask user for city and country."""
-    query = update.callback_query
-    await query.answer()
-    await query.edit_message_text("Please send your city and country in the format:\nCity, Country\n(e.g., Cairo, Egypt)")
-    return CITY_INFO
-
-async def city_config_receive(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Receive city info, determine timezone using prayer API, and save to DB."""
-    text = update.message.text.strip()
-    if "," not in text:
-        await update.message.reply_text("Invalid format. Please use: City, Country")
-        return CITY_INFO
-    city, country = [t.strip() for t in text.split(",", 1)]
-    import aiohttp
-    API_URL = "https://api.aladhan.com/v1/timingsByCity"
-    params = {'city': city, 'country': country, 'method': 3}
-    async with aiohttp.ClientSession() as session:
-        async with session.get(API_URL, params=params) as response:
-            data = await response.json()
-            timezone = data.get("data", {}).get("meta", {}).get("timezone", "Africa/Cairo")
-    user_id = str(update.effective_user.id)
-    async with async_session() as session:
-        await session.execute(
-            text("UPDATE users SET city = :city, country = :country, timezone = :tz WHERE telegram_id = :tid"),
-            {"city": city, "country": country, "tz": timezone, "tid": user_id}
-        )
-        await session.commit()
-    await update.message.reply_text(f"Configuration saved. Your timezone is set to {timezone}.")
-    return ConversationHandler.END
-
 async def get_user_language(user_id: str) -> str:
     """Get user's language from database."""
     async with async_session() as session:
@@ -222,6 +123,45 @@ async def get_user_language(user_id: str) -> str:
         )
         user = result.first()
         return user.language if user and user.language else "ar"
+
+async def send_athkar_reminder(user_id: str):
+    """Send Athkar reminder to user, rotating through selected Athkar."""
+    try:
+        async with async_session() as session:
+            result = await session.execute(text("SELECT athkar_preferences FROM users WHERE telegram_id = :tid"), {"tid": user_id})
+            user = result.first()
+            if not user or not user.athkar_preferences:
+                return
+            prefs = json.loads(user.athkar_preferences)
+            selected = prefs.get("selected", [])
+            if not selected:
+                return
+            last_index = prefs.get("last_index", 0)
+            athkar_text = selected[last_index % len(selected)]
+            lang = await get_user_language(user_id)
+            msg = f"تذكير بالذكر: {athkar_text}" if lang == "ar" else f"Athkar reminder: {athkar_text}"
+            await application.bot.send_message(chat_id=user_id, text=msg)
+            logger.info(f"Sent Athkar reminder to {user_id}: {athkar_text}")
+            # Update last_index
+            prefs["last_index"] = (last_index + 1) % len(selected)
+            await session.execute(text("UPDATE users SET athkar_preferences = :prefs WHERE telegram_id = :tid"), {"prefs": json.dumps(prefs), "tid": user_id})
+            await session.commit()
+    except Exception as e:
+        logger.exception(f"Error sending Athkar reminder to {user_id}")
+
+async def schedule_user_athkar():
+    """Schedule Athkar reminders for all users with interval mode."""
+    async with async_session() as session:
+        result = await session.execute(text("SELECT telegram_id, athkar_preferences FROM users WHERE athkar_preferences IS NOT NULL"))
+        users = result.fetchall()
+    for user in users:
+        user_id = user[0]
+        prefs = json.loads(user[1])
+        mode = prefs.get("mode")
+        value = prefs.get("value")
+        if mode == "freq_interval" and value:
+            scheduler.add_job(send_athkar_reminder, 'interval', minutes=value, args=[user_id], id=f"athkar_{user_id}", replace_existing=True)
+            logger.info(f"Scheduled Athkar reminders for {user_id} every {value} minutes")
 
 # --- Main Conversation Handler Setup ---
 def get_conversation_handler() -> ConversationHandler:
@@ -255,7 +195,7 @@ conversation_handler = get_conversation_handler()
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        # Ensure the language column exists
+        # Add language column if it doesn't exist
         await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS language VARCHAR DEFAULT 'ar'"))
 
 # Add async initialization function
@@ -264,19 +204,21 @@ async def init_application():
     logger.info("Initializing user_side application...")
     try:
         await application.initialize()
+
         await init_db()
-        
+
+        # Start scheduler
+        scheduler.start()
+        logger.info("User reminder scheduler started")
+
+        # Schedule user Athkar reminders
+        await schedule_user_athkar()
+
         # Add command handlers first
         application.add_handler(CommandHandler("start", start))
         
         # Then add conversation and callback handlers
         application.add_handler(conversation_handler)
-        application.add_handler(CallbackQueryHandler(
-            language_choice,
-            pattern="^lang_"
-        ))
-        
-        # Config handlers are now in the conversation
         
         logger.info("All handlers registered successfully")
     except Exception as e:
