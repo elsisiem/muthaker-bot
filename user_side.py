@@ -28,6 +28,8 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy import Column, Integer, String
 
+from aiohttp import web
+
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -365,3 +367,16 @@ async def init_application():
     except Exception as e:
         logger.exception("Error in init_application")
         raise
+
+# Define the webhook route
+async def webhook_handler(request):
+    update = await request.json()
+    await application.update_queue.put(Update.de_json(update, application.bot))
+    return web.Response(text="OK")
+
+# Initialize the application for webhook updates
+application = Application.builder().token(os.environ['TELEGRAM_BOT_TOKEN']).build()
+
+# Add webhook route to the web app
+web_app = web.Application()
+web_app.router.add_post("/webhook", webhook_handler)
