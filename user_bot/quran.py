@@ -49,7 +49,6 @@ async def quran_config_receive(update: Update, context: ContextTypes.DEFAULT_TYP
     """Receive Quran Wird configuration details and save to DB."""
     detail = update.message.text.strip()
     context.user_data["quran_detail"] = detail
-    import json
     quran_settings = {
         "mode": context.user_data.get("quran_mode"),
         "detail": detail,
