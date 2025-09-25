@@ -2,7 +2,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from sqlalchemy import text
 import json
-from user_side import async_session, get_user_language, ATHKAR, ATHKAR_FREQ
+from db import async_session, get_user_language, ATHKAR, ATHKAR_FREQ
 
 # Predefined Athkar list
 ATHKAR_LIST_AR = [

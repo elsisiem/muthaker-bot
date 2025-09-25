@@ -1,7 +1,7 @@
 from telegram import Update
 from telegram.ext import ContextTypes
 from sqlalchemy import text
-from user_side import async_session, get_user_language, CITY_INFO
+from db import async_session, get_user_language, CITY_INFO
 
 async def city_config_entry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Entry for city/timezone configuration."""

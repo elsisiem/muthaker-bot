@@ -1,7 +1,7 @@
 from telegram import Update
 from telegram.ext import ContextTypes
 from sqlalchemy import text
-from user_side import async_session, get_user_language, SLEEP_TIME
+from db import async_session, get_user_language, SLEEP_TIME
 
 async def sleep_config_entry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Entry for sleep-time supplications: ask user for typical sleep time."""

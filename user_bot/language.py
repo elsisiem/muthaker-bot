@@ -1,7 +1,7 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from sqlalchemy import text
-from user_side import async_session, get_user_language, MAIN_MENU
+from db import async_session, get_user_language, MAIN_MENU
 
 async def language_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle language selection."""
