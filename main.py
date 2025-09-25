@@ -57,8 +57,9 @@ async def run_user_interaction_bot():
     await init_application()
     logger.info("✅ User interaction system initialized")
 
-    # Start polling for user interactions as a background task
-    asyncio.create_task(user_app.run_polling(drop_pending_updates=True))
+    # Start polling for user interactions using the current event loop
+    loop = asyncio.get_running_loop()
+    loop.create_task(user_app.run_polling(drop_pending_updates=True))
     logger.info("✅ User interaction polling started")
 
 async def main():
