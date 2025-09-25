@@ -304,34 +304,13 @@ def get_conversation_handler() -> ConversationHandler:
         fallbacks=[CommandHandler("cancel", lambda update, context: update.message.reply_text("Configuration cancelled."))]
     )
 
+# Create conversation handler but don't add it yet
+conversation_handler = get_conversation_handler()
+
 # Instead of having async with at module level, create an init function
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-
-# Initialize the application with the same bot token as channel bot
-application = Application.builder().token(os.environ["TELEGRAM_BOT_TOKEN"]).build()
-
-# Create conversation handler but don't add it yet
-conversation_handler = get_conversation_handler()
-
-# Add webhook handler for user interactions
-async def webhook_handler(request):
-    """Handle incoming webhook updates for user interactions"""
-    try:
-        # Get the update data
-        update_data = await request.json()
-        
-        # Create Update object
-        update = Update.de_json(update_data, application.bot)
-        
-        # Process the update
-        await application.process_update(update)
-        
-        return web.Response(status=200)
-    except Exception as e:
-        logger.error(f"Error processing webhook update: {e}")
-        return web.Response(status=500)
 
 # Add async initialization function
 async def init_application():
@@ -380,3 +359,9 @@ application = Application.builder().token(os.environ['TELEGRAM_BOT_TOKEN']).buil
 # Add webhook route to the web app
 web_app = web.Application()
 web_app.router.add_post("/webhook", webhook_handler)
+
+# Add startup handler to initialize the Telegram application
+async def startup_handler(app):
+    await init_application()
+
+web_app.on_startup.append(startup_handler)
