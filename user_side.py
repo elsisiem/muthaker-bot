@@ -91,44 +91,35 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         await update.message.reply_text("An error occurred. Please try again with /start")
         return ConversationHandler.END
 
-async def send_athkar_reminder(user_id: str):
-    """Send Athkar reminder to user, rotating through selected Athkar."""
+async def send_athkar_reminder(user_id: str, athkar_text: str):
+    """Send Athkar reminder to user."""
     try:
-        async with async_session() as session:
-            result = await session.execute(text("SELECT athkar_preferences FROM users WHERE telegram_id = :tid"), {"tid": user_id})
-            user = result.first()
-            if not user or not user.athkar_preferences:
-                return
-            prefs = json.loads(user.athkar_preferences)
-            selected = prefs.get("selected", [])
-            if not selected:
-                return
-            last_index = prefs.get("last_index", 0)
-            athkar_text = selected[last_index % len(selected)]
-            lang = await get_user_language(user_id)
-            msg = f"تذكير بالذكر: {athkar_text}" if lang == "ar" else f"Athkar reminder: {athkar_text}"
-            await application.bot.send_message(chat_id=user_id, text=msg)
-            logger.info(f"Sent Athkar reminder to {user_id}: {athkar_text}")
-            # Update last_index
-            prefs["last_index"] = (last_index + 1) % len(selected)
-            await session.execute(text("UPDATE users SET athkar_preferences = :prefs WHERE telegram_id = :tid"), {"prefs": json.dumps(prefs), "tid": user_id})
-            await session.commit()
+        lang = await get_user_language(user_id)
+        msg = f"تذكير بالذكر: {athkar_text}" if lang == "ar" else f"Athkar reminder: {athkar_text}"
+        await application.bot.send_message(chat_id=user_id, text=msg)
+        logger.info(f"Sent Athkar reminder to {user_id}")
     except Exception as e:
         logger.exception(f"Error sending Athkar reminder to {user_id}")
 
 async def schedule_user_athkar():
-    """Schedule Athkar reminders for all users with interval mode."""
-    async with async_session() as session:
-        result = await session.execute(text("SELECT telegram_id, athkar_preferences FROM users WHERE athkar_preferences IS NOT NULL"))
-        users = result.fetchall()
-    for user in users:
-        user_id = user[0]
-        prefs = json.loads(user[1])
-        mode = prefs.get("mode")
-        value = prefs.get("value")
-        if mode == "freq_interval" and value:
-            scheduler.add_job(send_athkar_reminder, 'interval', minutes=value, args=[user_id], id=f"athkar_{user_id}", replace_existing=True)
-            logger.info(f"Scheduled Athkar reminders for {user_id} every {value} minutes")
+    """Schedule Athkar reminders for all users."""
+    try:
+        async with async_session() as session:
+            result = await session.execute(text("SELECT telegram_id, athkar_preferences FROM users WHERE athkar_preferences IS NOT NULL"))
+            users = result.fetchall()
+        for user in users:
+            user_id = user[0]
+            prefs = json.loads(user[1])
+            selected = prefs.get("selected", [])
+            mode = prefs.get("mode")
+            value = prefs.get("value")
+            if not selected:
+                continue
+            if mode == "freq_interval":
+                # Send the first athkar every value minutes
+                scheduler.add_job(send_athkar_reminder, 'interval', minutes=value, args=[user_id, selected[0]], id=f"athkar_{user_id}", replace_existing=True)
+    except Exception as e:
+        logger.exception("Error in schedule_user_athkar")
 
 # --- Main Conversation Handler Setup ---
 def get_conversation_handler() -> ConversationHandler:
@@ -164,8 +155,9 @@ async def init_application():
     logger.info("Initializing user_side application...")
     try:
         await application.initialize()
-
         await init_db()
+        scheduler.start()
+        await schedule_user_athkar()
 
         # Start scheduler
         scheduler.start()
