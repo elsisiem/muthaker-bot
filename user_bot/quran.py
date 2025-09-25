@@ -2,7 +2,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from sqlalchemy import text
 import json
-from user_side import async_session, get_user_language, QURAN_CHOICE, QURAN_DETAILS
+from db import async_session, get_user_language, QURAN_CHOICE, QURAN_DETAILS
 
 async def quran_config_entry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Entry point for Quran Wird configuration."""
