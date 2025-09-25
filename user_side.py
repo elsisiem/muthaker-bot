@@ -387,6 +387,8 @@ conversation_handler = get_conversation_handler()
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Add language column if it doesn't exist
+        await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS language VARCHAR DEFAULT 'ar'"))
 
 # Add async initialization function
 async def init_application():
