@@ -65,7 +65,7 @@ async def combined_main():
         # Start user interaction polling with the SAME bot
         logger.info("👥 Starting user interaction polling (same bot)...")
         from user_side import application as user_app
-        await user_app.start_polling(drop_pending_updates=True)
+        await user_app.run_polling(drop_pending_updates=True)
         logger.info("✅ User interaction polling started")
         
         # Channel bot scheduling loop (from original fazkerbot main)
