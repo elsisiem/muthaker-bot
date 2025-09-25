@@ -30,6 +30,12 @@ from sqlalchemy import Column, Integer, String, text
 
 from aiohttp import web
 
+from user_bot.language import language_choice
+from user_bot.athkar import athkar_config_entry, athkar_receive, athkar_freq_choice, athkar_freq_receive, ATHKAR_LIST_AR, ATHKAR_LIST_EN
+from user_bot.quran import quran_config_entry, quran_config_choice, quran_config_receive
+from user_bot.sleep import sleep_config_entry, sleep_config_receive
+from user_bot.city import city_config_entry, city_config_receive
+
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -64,30 +70,7 @@ class User(Base):
     quran_settings = Column(String)       # JSON string for Quran settings (mode, start, quantity)
 
 # Conversation states
-LANGUAGE, ATHKAR, ATHKAR_FREQ, QURAN_CHOICE, QURAN_DETAILS, SLEEP_TIME, CITY_INFO = range(7)
-
-# Predefined Athkar list
-ATHKAR_LIST_AR = [
-    "تهليل (La ilaha illa Allah)",
-    "تسبيح (SubhanAllah)",
-    "تحميد (Alhamdulillah)",
-    "تكبير (Allahu Akbar)",
-    "حوقلة (La hawla wa la quwwata illa billah)",
-    "الصلاة على النبي (Salawat)",
-    "دعاء ذي النون (La ilaha illa anta subhanaka inni kuntu min al-zalimin)",
-    "سبحان الله وبحمده، سبحان الله العظيم",
-]
-
-ATHKAR_LIST_EN = [
-    "Tahleel (La ilaha illa Allah)",
-    "Tasbeeh (SubhanAllah)",
-    "Tahmeed (Alhamdulillah)",
-    "Takbeer (Allahu Akbar)",
-    "Hawqala (La hawla wa la quwwata illa billah)",
-    "Salawat (Prayers upon the Prophet)",
-    "Dua of Dhun-Noon (La ilaha illa anta subhanaka inni kuntu min al-zalimin)",
-    "Subhan Allah wa bihamdihi, subhan Allah al-adheem",
-]
+LANGUAGE, MAIN_MENU, ATHKAR, ATHKAR_FREQ, QURAN_CHOICE, QURAN_DETAILS, SLEEP_TIME, CITY_INFO = range(8)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start the configuration conversation."""
@@ -124,128 +107,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         logger.exception("Error in start command")
         await update.message.reply_text("An error occurred. Please try again with /start")
         return ConversationHandler.END
-
-async def language_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle language selection."""
-    query = update.callback_query
-    await query.answer()
-    choice = query.data  # "lang_ar" or "lang_en"
-    lang = "ar" if choice == "lang_ar" else "en"
-    user_id = str(update.effective_user.id)
-    
-    # Save language to database
-    async with async_session() as session:
-        await session.execute(
-            text("UPDATE users SET language = :lang WHERE telegram_id = :tid"),
-            {"lang": lang, "tid": user_id}
-        )
-        await session.commit()
-    
-    if lang == "ar":
-        message = "مرحبا بك في مذكر! اختر خيار التكوين:"
-    else:
-        message = "Welcome to Muthaker! Choose a configuration option:"
-    
-    # Present configuration options
-    keyboard = [
-        [InlineKeyboardButton("تكوين تذكير الأذكار" if lang == "ar" else "Configure Athkar Reminders", callback_data="config_athkar")],
-        [InlineKeyboardButton("تكوين ورد القرآن" if lang == "ar" else "Configure Quran Wird", callback_data="config_quran")],
-        [InlineKeyboardButton("تعيين أدعية وقت النوم" if lang == "ar" else "Set Sleep-Time Supplications", callback_data="config_sleep")],
-        [InlineKeyboardButton("تعيين المدينة/المنطقة الزمنية" if lang == "ar" else "Set City/Timezone", callback_data="config_city")],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(text=message, reply_markup=reply_markup)
-    return ConversationHandler.END
-
-# --- Athkar Configuration Flow ---
-async def athkar_config_entry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Entry point for Athkar configuration."""
-    query = update.callback_query
-    await query.answer()
-    user_id = str(update.effective_user.id)
-    lang = await get_user_language(user_id)
-    athkar_list = ATHKAR_LIST_AR if lang == "ar" else ATHKAR_LIST_EN
-    context.user_data["athkar_list"] = athkar_list
-    if lang == "ar":
-        text = "اختر الأذكار التي تريد التذكير بها:\n" + "\n".join(f"{i+1}: {item}" for i, item in enumerate(athkar_list))
-        text += "\n\nيرجى الرد بأرقام الاختيارات مفصولة بفواصل (مثال: 1,3,5)."
-    else:
-        text = "Select the Athkar you want reminders for:\n" + "\n".join(f"{i+1}: {item}" for i, item in enumerate(athkar_list))
-        text += "\n\nPlease reply with the numbers of the selections separated by commas (e.g. 1,3,5)."
-    await query.edit_message_text(text=text)
-    return ATHKAR
-
-async def athkar_receive(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Receive user's Athkar selections."""
-    athkar_list = context.user_data.get("athkar_list", ATHKAR_LIST_AR)
-    selections = update.message.text.split(",")
-    try:
-        indices = [int(s.strip()) for s in selections if s.strip().isdigit() and 1 <= int(s.strip()) <= len(athkar_list)]
-    except Exception:
-        lang = await get_user_language(str(update.effective_user.id))
-        error_msg = "إدخال غير صحيح. يرجى إدخال أرقام مفصولة بفواصل." if lang == "ar" else "Invalid input. Please enter numbers separated by commas."
-        await update.message.reply_text(error_msg)
-        return ATHKAR
-    chosen = [athkar_list[i-1] for i in indices]
-    context.user_data["athkar"] = chosen
-    lang = await get_user_language(str(update.effective_user.id))
-    if lang == "ar":
-        keyboard = [
-            [InlineKeyboardButton("عدد ثابت يوميًا", callback_data="freq_fixed")],
-            [InlineKeyboardButton("فترة زمنية (مثل كل ساعتين)", callback_data="freq_interval")],
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("اختر وضع التكرار لتذكيرات الأذكار:", reply_markup=reply_markup)
-    else:
-        keyboard = [
-            [InlineKeyboardButton("Fixed Number per Day", callback_data="freq_fixed")],
-            [InlineKeyboardButton("Time Interval (e.g. every 2 hours)", callback_data="freq_interval")],
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("Choose the frequency mode for Athkar reminders:", reply_markup=reply_markup)
-    return ATHKAR_FREQ
-
-async def athkar_freq_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Process frequency choice for Athkar reminders."""
-    query = update.callback_query
-    await query.answer()
-    mode = query.data  # "freq_fixed" or "freq_interval"
-    context.user_data["athkar_freq_mode"] = mode
-    lang = await get_user_language(str(update.effective_user.id))
-    if mode == "freq_fixed":
-        msg = "أدخل العدد الثابت من التذكيرات يوميًا (مثال: 10):" if lang == "ar" else "Enter the fixed number of reminders per day (e.g., 10):"
-    else:
-        msg = "أدخل الفترة الزمنية بالساعات (مثال: 2):" if lang == "ar" else "Enter the time interval in hours (e.g., 2):"
-    await query.edit_message_text(msg)
-    return ATHKAR_FREQ
-
-async def athkar_freq_receive(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Receive the frequency value for Athkar reminders."""
-    try:
-        value = int(update.message.text.strip())
-    except Exception:
-        lang = await get_user_language(str(update.effective_user.id))
-        error_msg = "يرجى إدخال رقم صحيح." if lang == "ar" else "Please enter a valid number."
-        await update.message.reply_text(error_msg)
-        return ATHKAR_FREQ
-    context.user_data["athkar_freq_value"] = value
-    import json
-    athkar_prefs = {
-        "selected": context.user_data.get("athkar", []),
-        "mode": context.user_data.get("athkar_freq_mode"),
-        "value": value
-    }
-    user_id = str(update.effective_user.id)
-    async with async_session() as session:
-        await session.execute(
-            text("UPDATE users SET athkar_preferences = :prefs WHERE telegram_id = :tid"),
-            {"prefs": json.dumps(athkar_prefs), "tid": user_id}
-        )
-        await session.commit()
-    lang = await get_user_language(user_id)
-    success_msg = "تم حفظ تفضيلات الأذكار بنجاح." if lang == "ar" else "Athkar preferences saved successfully."
-    await update.message.reply_text(success_msg)
-    return ConversationHandler.END
 
 # --- Quran Wird Configuration Flow ---
 async def quran_config_entry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -367,6 +228,13 @@ def get_conversation_handler() -> ConversationHandler:
     return ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
+            LANGUAGE: [CallbackQueryHandler(language_choice, pattern="^lang_")],
+            MAIN_MENU: [
+                CallbackQueryHandler(athkar_config_entry, pattern="^config_athkar$"),
+                CallbackQueryHandler(quran_config_entry, pattern="^config_quran$"),
+                CallbackQueryHandler(sleep_config_entry, pattern="^config_sleep$"),
+                CallbackQueryHandler(city_config_entry, pattern="^config_city$"),
+            ],
             ATHKAR: [MessageHandler(filters.TEXT & ~filters.COMMAND, athkar_receive)],
             ATHKAR_FREQ: [
                 CallbackQueryHandler(athkar_freq_choice, pattern="^freq_"),
@@ -387,7 +255,7 @@ conversation_handler = get_conversation_handler()
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        # Add language column if it doesn't exist
+        # Ensure the language column exists
         await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS language VARCHAR DEFAULT 'ar'"))
 
 # Add async initialization function
@@ -407,22 +275,8 @@ async def init_application():
             language_choice,
             pattern="^lang_"
         ))
-        application.add_handler(CallbackQueryHandler(
-            athkar_config_entry,
-            pattern="^config_athkar$"
-        ))
-        application.add_handler(CallbackQueryHandler(
-            quran_config_entry,
-            pattern="^config_quran$"
-        ))
-        application.add_handler(CallbackQueryHandler(
-            sleep_config_entry,
-            pattern="^config_sleep$"
-        ))
-        application.add_handler(CallbackQueryHandler(
-            city_config_entry,
-            pattern="^config_city$"
-        ))
+        
+        # Config handlers are now in the conversation
         
         logger.info("All handlers registered successfully")
     except Exception as e:
