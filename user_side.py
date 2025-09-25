@@ -10,6 +10,8 @@ import os
 import logging
 import asyncio
 from datetime import datetime
+import json
+import aiohttp
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
@@ -30,12 +32,18 @@ from sqlalchemy import Column, Integer, String
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# DATABASE_URL updated with proper format and handling Heroku's URL format
+# DATABASE_URL - Heroku automatically sets this when PostgreSQL addon is attached
 DATABASE_URL = os.environ.get("DATABASE_URL")
-if (DATABASE_URL and DATABASE_URL.startswith("postgres://")):
+if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
+    # Convert postgres:// to postgresql+asyncpg:// for SQLAlchemy async
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
+    logger.info("Using DATABASE_URL from environment (converted for asyncpg)")
+elif DATABASE_URL:
+    logger.info("Using DATABASE_URL from environment")
 else:
+    # Fallback to direct connection string (your provided credentials)
     DATABASE_URL = "postgresql+asyncpg://u3cmevgl2g6c6j:paf6377466881a2403b02f14624b98bf68879ed773b2ccf111d397fe536a381b9@c9pv5s2sq0i76o.cluster-czrs8kj4isg7.us-east-1.rds.amazonaws.com:5432/d1f1puvchrt773"
+    logger.warning("Using fallback database connection string")
 
 engine = create_async_engine(DATABASE_URL, echo=True)
 Base = declarative_base()
@@ -299,11 +307,29 @@ async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-# Initialize the application
+# Initialize the application with the same bot token as channel bot
 application = Application.builder().token(os.environ["TELEGRAM_BOT_TOKEN"]).build()
 
 # Create conversation handler but don't add it yet
 conversation_handler = get_conversation_handler()
+
+# Add webhook handler for user interactions
+async def webhook_handler(request):
+    """Handle incoming webhook updates for user interactions"""
+    try:
+        # Get the update data
+        update_data = await request.json()
+        
+        # Create Update object
+        update = Update.de_json(update_data, application.bot)
+        
+        # Process the update
+        await application.process_update(update)
+        
+        return web.Response(status=200)
+    except Exception as e:
+        logger.error(f"Error processing webhook update: {e}")
+        return web.Response(status=500)
 
 # Add async initialization function
 async def init_application():
