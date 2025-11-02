@@ -624,6 +624,12 @@ async def schedule_tasks():
         logger.info(f"Total tasks scheduled: {len(DAILY_TASKS)}")
         for task in sorted(DAILY_TASKS, key=lambda x: x['time']):
             logger.info(f"Task: {task['description']} scheduled for {task['time']}")
+        
+        # Also log the actual scheduler jobs
+        scheduled_jobs = scheduler.get_jobs()
+        logger.info(f"Scheduler has {len(scheduled_jobs)} jobs:")
+        for job in scheduled_jobs:
+            logger.info(f"  Job ID: {job.id}, Next run: {job.next_run_time}")
 
     except Exception as e:
         logger.error(f"Error in schedule_tasks: {e}", exc_info=True)
@@ -639,12 +645,23 @@ async def heartbeat():
     while True:
         now = datetime.now(CAIRO_TZ)
         scheduled_count = len(DAILY_TASKS) if DAILY_TASKS else 0
-        logger.info(f"💓 Bot running | {now.strftime('%H:%M')} | {scheduled_count} tasks scheduled")
+        scheduler_jobs = len(scheduler.get_jobs()) if scheduler.running else 0
+        logger.info(f"💓 Bot running | {now.strftime('%H:%M')} | {scheduled_count} tasks scheduled | {scheduler_jobs} scheduler jobs | Scheduler running: {scheduler.running}")
         await asyncio.sleep(300)  # Every 5 minutes instead of every minute
 
 from aiohttp import web
 
 async def handle(request):
+    # Check if this is a test request
+    if request.path_info == '/test-quran':
+        try:
+            logger.info("🧪 Manual Quran test triggered via webhook")
+            await send_quran_pages()
+            return web.Response(text="Quran test sent!")
+        except Exception as e:
+            logger.error(f"Test failed: {e}")
+            return web.Response(text=f"Test failed: {e}", status=500)
+    
     return web.Response(text="Bot is running!")
 
 def format_time_until(target_time, now):
