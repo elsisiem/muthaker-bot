@@ -43,9 +43,11 @@ if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
 elif DATABASE_URL:
     logger.info("Using DATABASE_URL from environment")
 else:
-    # Fallback to direct connection string (your provided credentials)
-    DATABASE_URL = "postgresql+asyncpg://u3cmevgl2g6c6j:paf6377466881a2403b02f14624b98bf68879ed773b2ccf111d397fe536a381b9@c9pv5s2sq0i76o.cluster-czrs8kj4isg7.us-east-1.rds.amazonaws.com:5432/d1f1puvchrt773"
-    logger.warning("Using fallback database connection string")
+    # Fail-fast: do not allow a hardcoded database connection string in source.
+    # Require operators to provide DATABASE_URL via environment variables or a
+    # secure secrets manager. This prevents accidental credential leakage.
+    logger.error("DATABASE_URL environment variable is not set. Aborting to avoid hardcoded credentials.")
+    raise RuntimeError("DATABASE_URL is not set. Please set the DATABASE_URL environment variable and restart the application.")
 
 engine = create_async_engine(DATABASE_URL, echo=True)
 Base = declarative_base()
