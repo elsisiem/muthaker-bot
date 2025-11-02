@@ -257,8 +257,8 @@ async def find_previous_athkar(chat_id):
 
 def get_next_quran_pages():
     """Calculate next Quran pages based on anchor date"""
-    # Recalibrated anchor to align with May 26th, 2025 target (pages 2-3)
-    anchor_date = datetime(2025, 5, 26).date()  # New anchor date: May 26th, 2025
+    # Recalibrated anchor to align with November 2nd, 2025 target (pages 248-249)
+    anchor_date = datetime(2025, 7, 2).date()  # New anchor date: July 2nd, 2025
     anchor_page1 = 2  # Anchor page
     anchor_page2 = 3  # Anchor page
     total_pages = 604  # Maximum page number
@@ -293,7 +293,7 @@ def get_next_quran_pages():
 
 def get_next_quran_pages_for_date(target_date):
     """Calculate Quran pages for a specific date"""
-    anchor_date = datetime(2025, 5, 26).date()
+    anchor_date = datetime(2025, 7, 2).date()
     anchor_page1 = 2
     anchor_page2 = 3
     total_pages = 604
