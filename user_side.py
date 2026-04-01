@@ -1,6 +1,6 @@
 ﻿"""
 Interactive user preferences bot for personalized Athkar reminders.
-Users choose Athkar content, frequency, language, and delivery mode.
+Supports Arabic/English UI, interval or daily-goal planning, and rotating/batch delivery.
 """
 
 import os
@@ -8,8 +8,8 @@ import logging
 import json
 import asyncio
 from datetime import datetime
-import pytz
 
+import pytz
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
     Application,
@@ -21,7 +21,7 @@ from telegram.ext import (
 )
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, select, Text, text
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, select, Text, text, delete
 from sqlalchemy.orm import declarative_base
 from aiohttp import web
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -54,17 +54,17 @@ async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False
 
 
 class UserPreferences(Base):
-    """User preferences model for Athkar reminders."""
     __tablename__ = "user_preferences"
 
     id = Column(Integer, primary_key=True)
     telegram_id = Column(String, unique=True, index=True)
     first_name = Column(String, nullable=True)
-    selected_athkar = Column(Text, nullable=True)  # JSON: ["hizb", "baaqiyat", ...]
-    frequency = Column(String, default="2x_daily")
+    selected_athkar = Column(Text, nullable=True)
+    frequency = Column(String, default="every_30_min")
     custom_frequency_minutes = Column(Integer, nullable=True)
-    delivery_mode = Column(String, default="rotating")  # rotating | batch
-    language = Column(String, default="ar")  # ar | en
+    daily_goal_count = Column(Integer, nullable=True)
+    delivery_mode = Column(String, default="rotating")
+    language = Column(String, default="ar")
     timezone = Column(String, default="Africa/Cairo")
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -72,7 +72,7 @@ class UserPreferences(Base):
 
 
 # ============================================================================
-# CONTENT DEFINITIONS
+# CONTENT
 # ============================================================================
 
 ATHKAR_OPTIONS = [
@@ -141,92 +141,115 @@ ATHKAR_OPTIONS = [
     },
 ]
 
-FREQUENCY_OPTIONS = {
+INTERVAL_PRESETS = {
     "every_1_min": {"minutes": 1, "ar": "كل دقيقة", "en": "Every minute"},
     "every_5_min": {"minutes": 5, "ar": "كل 5 دقائق", "en": "Every 5 minutes"},
     "every_30_min": {"minutes": 30, "ar": "كل 30 دقيقة", "en": "Every 30 minutes"},
     "hourly": {"minutes": 60, "ar": "كل ساعة", "en": "Hourly"},
-    "1x_daily": {"times": ["09:00"], "ar": "مرة يوميًا", "en": "Once daily"},
-    "2x_daily": {"times": ["09:00", "18:00"], "ar": "مرتان يوميًا", "en": "Twice daily"},
-    "3x_daily": {"times": ["09:00", "13:00", "18:00"], "ar": "ثلاث مرات يوميًا", "en": "Three times daily"},
+}
+
+GOAL_PRESETS = {
+    "goal_100": 100,
+    "goal_200": 200,
+    "goal_300": 300,
 }
 
 TEXTS = {
     "ar": {
-        "welcome_new": "مرحبًا {name}.\n\nأهلًا بك في خدمة إعداد تذكيرات الأذكار.\nابدأ باختيار اللغة.",
-        "welcome_existing": "مرحبًا {name}.\n\nإعداداتك محفوظة. اختر الإجراء المطلوب.",
-        "btn_lang": "اختيار اللغة",
-        "btn_edit_athkar": "تعديل الأذكار",
-        "btn_edit_freq": "تعديل التكرار",
+        "start_bilingual": "مرحبًا بك في خدمة تذكيرات الأذكار.\nWelcome to Athkar Reminder Service.\n\nيرجى اختيار اللغة المفضلة / Please choose your preferred language:",
+        "welcome_existing": "تم تحميل إعداداتك. يمكنك المتابعة أو التعديل.",
+        "welcome_new": "ابدأ إعداداتك بالخطوات التالية.",
+        "btn_ar": "العربية",
+        "btn_en": "English",
         "btn_show": "عرض الإعدادات",
-        "btn_start_setup": "بدء الإعداد",
-        "choose_lang": "اختر اللغة المفضلة:",
-        "lang_saved": "تم حفظ اللغة.",
-        "choose_athkar": "اختر الأذكار المطلوبة:\nيمكن اختيار أكثر من عنصر.",
+        "btn_edit_athkar": "تعديل الأذكار",
+        "btn_edit_plan": "تعديل خطة الإرسال",
+        "btn_reset": "إعادة الضبط الكامل",
+        "btn_back": "رجوع",
+        "btn_save": "حفظ",
+        "btn_continue": "متابعة",
+        "choose_athkar": "اختر الأذكار المطلوبة:",
         "btn_select_all": "تحديد الكل",
         "btn_clear_all": "إلغاء تحديد الكل",
-        "btn_continue": "متابعة إلى التكرار",
-        "btn_back": "رجوع",
-        "need_athkar": "يرجى اختيار ذكر واحد على الأقل.",
-        "choose_freq": "اختر وتيرة التذكير:",
-        "btn_custom_freq": "تكرار مخصص",
-        "custom_prompt": "أرسل عدد الدقائق للتكرار المخصص (من 1 إلى 1440). مثال: 7",
-        "custom_invalid": "القيمة غير صحيحة. أرسل رقمًا من 1 إلى 1440.",
-        "choose_mode": "اختر أسلوب الإرسال:\n1) دفعة واحدة: إرسال جميع الأذكار في كل دورة.\n2) بالتناوب: إرسال ذكر مختلف في كل دورة.",
+        "choose_strategy": "اختر نوع الخطة:",
+        "btn_strategy_interval": "خطة زمنية (كل X دقيقة/ساعة)",
+        "btn_strategy_goal": "خطة هدف يومي (عدد مرات يوميًا)",
+        "choose_interval": "اختر الفاصل الزمني:",
+        "btn_custom_interval": "فاصل مخصص",
+        "choose_goal": "اختر الهدف اليومي:",
+        "btn_custom_goal": "هدف يومي مخصص",
+        "prompt_custom_interval": "أرسل عدد الدقائق للفاصل المخصص (1 إلى 1440).",
+        "prompt_custom_goal": "أرسل العدد المستهدف يوميًا (1 إلى 10000).",
+        "invalid_number": "القيمة غير صحيحة. حاول مرة أخرى بالصيغة الرقمية المطلوبة.",
+        "choose_mode": "اختر أسلوب الإرسال:",
         "mode_batch": "دفعة واحدة",
         "mode_rotating": "بالتناوب",
-        "saved": "تم حفظ إعداداتك بنجاح.",
+        "saved": "تم حفظ الإعدادات بنجاح.",
         "prefs_title": "الإعدادات الحالية",
         "field_lang": "اللغة",
         "field_athkar": "الأذكار",
-        "field_freq": "التكرار",
+        "field_plan": "الخطة",
         "field_mode": "أسلوب الإرسال",
-        "empty_athkar": "لا توجد أذكار محددة حتى الآن.",
-        "lang_ar": "العربية",
-        "lang_en": "الإنجليزية",
+        "empty_athkar": "لا توجد أذكار محددة بعد.",
+        "confirm_reset": "سيتم حذف جميع إعداداتك والبدء من جديد.",
+        "reset_done": "تمت إعادة الضبط الكامل. ابدأ من جديد.",
+        "need_athkar": "يرجى اختيار ذكر واحد على الأقل.",
         "mode_batch_label": "دفعة واحدة",
         "mode_rotating_label": "بالتناوب",
-        "btn_change_lang": "تغيير اللغة",
+        "lang_label_ar": "العربية",
+        "lang_label_en": "English",
+        "spam_warning": "تنبيه: حسب إعداداتك، متوسط الإرسال أسرع من كل 30 ثانية وقد يكون مزعجًا.",
+        "save_hint": "يمكنك الحفظ الآن دون إعادة إعداد بقية الخيارات.",
     },
     "en": {
-        "welcome_new": "Welcome {name}.\n\nThis service helps you configure Athkar reminders.\nUse the buttons below to choose language and settings.",
-        "welcome_existing": "Welcome {name}.\n\nYour settings are saved. Choose an action.",
-        "btn_lang": "Choose language",
-        "btn_edit_athkar": "Edit Athkar",
-        "btn_edit_freq": "Edit frequency",
+        "start_bilingual": "مرحبًا بك في خدمة تذكيرات الأذكار.\nWelcome to Athkar Reminder Service.\n\nيرجى اختيار اللغة المفضلة / Please choose your preferred language:",
+        "welcome_existing": "Your settings are loaded. You can continue or edit.",
+        "welcome_new": "Start your setup with the following steps.",
+        "btn_ar": "Arabic",
+        "btn_en": "English",
         "btn_show": "View settings",
-        "btn_start_setup": "Start setup",
-        "choose_lang": "Choose your preferred language:",
-        "lang_saved": "Language saved. Welcome to your Athkar reminder settings.",
-        "choose_athkar": "Select the Athkar you want:\nYou can select multiple items.",
+        "btn_edit_athkar": "Edit Athkar",
+        "btn_edit_plan": "Edit delivery plan",
+        "btn_reset": "Reset everything",
+        "btn_back": "Back",
+        "btn_save": "Save",
+        "btn_continue": "Continue",
+        "choose_athkar": "Choose your Athkar:",
         "btn_select_all": "Select all",
         "btn_clear_all": "Clear all",
-        "btn_continue": "Continue to frequency",
-        "btn_back": "Back",
-        "need_athkar": "Please select at least one Athkar.",
-        "choose_freq": "Choose reminder frequency:",
-        "btn_custom_freq": "Custom interval",
-        "custom_prompt": "Send the custom interval in minutes (1 to 1440). Example: 7",
-        "custom_invalid": "Invalid value. Send a number from 1 to 1440.",
-        "choose_mode": "Choose delivery mode:\n1) Batch: send all selected Athkar each cycle.\n2) Rotating: send one different Athkar per cycle.",
+        "choose_strategy": "Choose planning type:",
+        "btn_strategy_interval": "Timeframe plan (every X minutes/hours)",
+        "btn_strategy_goal": "Daily target plan (N times per day)",
+        "choose_interval": "Choose interval:",
+        "btn_custom_interval": "Custom interval",
+        "choose_goal": "Choose daily target:",
+        "btn_custom_goal": "Custom daily target",
+        "prompt_custom_interval": "Send interval in minutes (1 to 1440).",
+        "prompt_custom_goal": "Send target count per day (1 to 10000).",
+        "invalid_number": "Invalid value. Please send a numeric value in the allowed range.",
+        "choose_mode": "Choose delivery mode:",
         "mode_batch": "Batch",
         "mode_rotating": "Rotating",
-        "saved": "Your settings have been saved.",
+        "saved": "Settings saved successfully.",
         "prefs_title": "Current settings",
         "field_lang": "Language",
         "field_athkar": "Athkar",
-        "field_freq": "Frequency",
+        "field_plan": "Plan",
         "field_mode": "Delivery mode",
         "empty_athkar": "No Athkar selected yet.",
-        "lang_ar": "Arabic",
-        "lang_en": "English",
+        "confirm_reset": "All your settings will be removed and setup will start over.",
+        "reset_done": "Reset completed. Start again.",
+        "need_athkar": "Please select at least one Athkar.",
         "mode_batch_label": "Batch",
         "mode_rotating_label": "Rotating",
-        "btn_change_lang": "Change language",
+        "lang_label_ar": "Arabic",
+        "lang_label_en": "English",
+        "spam_warning": "Warning: with your settings, average sends are faster than every 30 seconds and may feel spammy.",
+        "save_hint": "You can save now without reconfiguring other options.",
     },
 }
 
-# User reminder scheduler state
+# Scheduler state
 reminder_scheduler = AsyncIOScheduler(timezone=CAIRO_TZ)
 reminder_lock = asyncio.Lock()
 rotation_state: dict[str, int] = {}
@@ -236,50 +259,19 @@ rotation_state: dict[str, int] = {}
 # HELPERS
 # ============================================================================
 
-def tr(lang: str, key: str, **kwargs) -> str:
-    safe_lang = "en" if lang == "en" else "ar"
-    value = TEXTS[safe_lang][key]
-    if kwargs:
-        return value.format(**kwargs)
-    return value
+def tr(lang: str, key: str) -> str:
+    safe = "en" if lang == "en" else "ar"
+    return TEXTS[safe][key]
 
 
-def get_lang_from_prefs(user_prefs: UserPreferences | None) -> str:
-    if user_prefs and user_prefs.language in ("ar", "en"):
-        return user_prefs.language
-    return "ar"
-
-
-async def get_user_language(user_id: str, context: ContextTypes.DEFAULT_TYPE) -> str:
-    lang = context.user_data.get("lang")
-    if lang in ("ar", "en"):
-        return lang
-
-    user_prefs = await get_user_prefs(user_id)
-    lang = get_lang_from_prefs(user_prefs)
-    context.user_data["lang"] = lang
-    return lang
-
-
-def get_selected_athkar_names(selected_ids: list[str], lang: str) -> list[str]:
-    key = "en" if lang == "en" else "ar"
-    return [a[key] for a in ATHKAR_OPTIONS if a["id"] in selected_ids]
-
-
-def format_frequency_label(frequency: str, custom_minutes: int | None, lang: str) -> str:
-    if frequency == "custom_interval" and custom_minutes:
-        if lang == "en":
-            return f"Every {custom_minutes} minute(s)"
-        return f"كل {custom_minutes} دقيقة"
-
-    option = FREQUENCY_OPTIONS.get(frequency)
-    if not option:
-        return frequency
-
-    label = option["en"] if lang == "en" else option["ar"]
-    if "times" in option:
-        return f"{label} ({', '.join(option['times'])})"
-    return label
+def parse_selected(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw)
+        return value if isinstance(value, list) else []
+    except Exception:
+        return []
 
 
 def get_athkar_option(athkar_id: str):
@@ -289,13 +281,215 @@ def get_athkar_option(athkar_id: str):
     return None
 
 
-async def send_user_reminder(telegram_id: str):
-    """Dispatch one reminder cycle for a user according to mode and language."""
-    user_prefs = await get_user_prefs(telegram_id)
-    if not user_prefs or not user_prefs.is_active or not user_prefs.selected_athkar:
+def get_user_lang_from_context(context: ContextTypes.DEFAULT_TYPE) -> str:
+    return "en" if context.user_data.get("lang") == "en" else "ar"
+
+
+def get_selected_names(selected_ids: list[str], lang: str) -> list[str]:
+    key = "en" if lang == "en" else "ar"
+    return [a[key] for a in ATHKAR_OPTIONS if a["id"] in selected_ids]
+
+
+def load_draft_from_prefs(context: ContextTypes.DEFAULT_TYPE, prefs: UserPreferences | None):
+    if not prefs:
+        context.user_data["draft_selected"] = []
+        context.user_data["draft_frequency"] = "every_30_min"
+        context.user_data["draft_custom_minutes"] = None
+        context.user_data["draft_goal_count"] = None
+        context.user_data["draft_mode"] = "rotating"
         return
 
-    selected_ids = json.loads(user_prefs.selected_athkar)
+    context.user_data["draft_selected"] = parse_selected(prefs.selected_athkar)
+    context.user_data["draft_frequency"] = prefs.frequency or "every_30_min"
+    context.user_data["draft_custom_minutes"] = prefs.custom_frequency_minutes
+    context.user_data["draft_goal_count"] = prefs.daily_goal_count
+    context.user_data["draft_mode"] = prefs.delivery_mode or "rotating"
+
+
+def get_plan_label(lang: str, frequency: str, custom_minutes: int | None, goal_count: int | None) -> str:
+    if frequency == "custom_interval" and custom_minutes:
+        return f"{custom_minutes} min" if lang == "en" else f"كل {custom_minutes} دقيقة"
+    if frequency == "goal_per_day" and goal_count:
+        return f"{goal_count} times/day" if lang == "en" else f"{goal_count} مرة يوميًا"
+    if frequency in INTERVAL_PRESETS:
+        return INTERVAL_PRESETS[frequency]["en" if lang == "en" else "ar"]
+    return frequency
+
+
+def compute_cycle_seconds(frequency: str, custom_minutes: int | None, goal_count: int | None) -> float:
+    if frequency == "custom_interval" and custom_minutes:
+        return float(custom_minutes * 60)
+    if frequency == "goal_per_day" and goal_count and goal_count > 0:
+        return 86400.0 / float(goal_count)
+    if frequency in INTERVAL_PRESETS:
+        return float(INTERVAL_PRESETS[frequency]["minutes"] * 60)
+    return 300.0
+
+
+def compute_spam_warning(selected_count: int, mode: str, frequency: str, custom_minutes: int | None, goal_count: int | None) -> bool:
+    if selected_count <= 0:
+        return False
+    cycle_seconds = compute_cycle_seconds(frequency, custom_minutes, goal_count)
+    per_cycle_messages = selected_count if mode == "batch" else 1
+    avg_spacing = cycle_seconds / max(1, per_cycle_messages)
+    return avg_spacing < 30.0
+
+
+def main_menu(lang: str, has_prefs: bool) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(tr(lang, "btn_show"), callback_data="show_prefs")],
+        [InlineKeyboardButton(tr(lang, "btn_edit_athkar"), callback_data="edit_athkar")],
+        [InlineKeyboardButton(tr(lang, "btn_edit_plan"), callback_data="edit_plan")],
+        [InlineKeyboardButton(tr(lang, "btn_reset"), callback_data="reset_all")],
+    ]
+    return InlineKeyboardMarkup(rows)
+
+
+def language_menu(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(tr(lang, "btn_ar"), callback_data="set_lang_ar")],
+        [InlineKeyboardButton(tr(lang, "btn_en"), callback_data="set_lang_en")],
+    ])
+
+
+def athkar_menu(lang: str, selected: list[str]) -> InlineKeyboardMarkup:
+    all_selected = len(selected) == len(ATHKAR_OPTIONS)
+    rows = [
+        [InlineKeyboardButton(tr(lang, "btn_clear_all") if all_selected else tr(lang, "btn_select_all"), callback_data="toggle_all_athkar")]
+    ]
+    key = "en" if lang == "en" else "ar"
+    for item in ATHKAR_OPTIONS:
+        prefix = "✓ " if item["id"] in selected else "○ "
+        rows.append([InlineKeyboardButton(prefix + item[key], callback_data=f"toggle_athkar_{item['id']}")])
+
+    rows.append([InlineKeyboardButton(tr(lang, "btn_save"), callback_data="save_now")])
+    rows.append([InlineKeyboardButton(tr(lang, "btn_continue"), callback_data="choose_strategy")])
+    rows.append([InlineKeyboardButton(tr(lang, "btn_back"), callback_data="home")])
+    return InlineKeyboardMarkup(rows)
+
+
+def strategy_menu(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(tr(lang, "btn_strategy_interval"), callback_data="strategy_interval")],
+        [InlineKeyboardButton(tr(lang, "btn_strategy_goal"), callback_data="strategy_goal")],
+        [InlineKeyboardButton(tr(lang, "btn_save"), callback_data="save_now")],
+        [InlineKeyboardButton(tr(lang, "btn_back"), callback_data="home")],
+    ])
+
+
+def interval_menu(lang: str) -> InlineKeyboardMarkup:
+    rows = []
+    for code in ["every_1_min", "every_5_min", "every_30_min", "hourly"]:
+        rows.append([InlineKeyboardButton(INTERVAL_PRESETS[code]["en" if lang == "en" else "ar"], callback_data=f"set_interval_{code}")])
+    rows.append([InlineKeyboardButton(tr(lang, "btn_custom_interval"), callback_data="custom_interval")])
+    rows.append([InlineKeyboardButton(tr(lang, "btn_save"), callback_data="save_now")])
+    rows.append([InlineKeyboardButton(tr(lang, "btn_back"), callback_data="choose_strategy")])
+    return InlineKeyboardMarkup(rows)
+
+
+def goal_menu(lang: str) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton("100", callback_data="set_goal_100")],
+        [InlineKeyboardButton("200", callback_data="set_goal_200")],
+        [InlineKeyboardButton("300", callback_data="set_goal_300")],
+        [InlineKeyboardButton(tr(lang, "btn_custom_goal"), callback_data="custom_goal")],
+        [InlineKeyboardButton(tr(lang, "btn_save"), callback_data="save_now")],
+        [InlineKeyboardButton(tr(lang, "btn_back"), callback_data="choose_strategy")],
+    ]
+    return InlineKeyboardMarkup(rows)
+
+
+def mode_menu(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(tr(lang, "mode_batch"), callback_data="set_mode_batch")],
+        [InlineKeyboardButton(tr(lang, "mode_rotating"), callback_data="set_mode_rotating")],
+        [InlineKeyboardButton(tr(lang, "btn_save"), callback_data="save_now")],
+        [InlineKeyboardButton(tr(lang, "btn_back"), callback_data="choose_strategy")],
+    ])
+
+
+# ============================================================================
+# DATABASE
+# ============================================================================
+
+async def init_db():
+    logger.info("Creating database tables...")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS custom_frequency_minutes INTEGER"))
+        await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS delivery_mode VARCHAR DEFAULT 'rotating'"))
+        await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS language VARCHAR DEFAULT 'ar'"))
+        await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS daily_goal_count INTEGER"))
+    logger.info("Database tables ready")
+
+
+async def get_user_prefs(telegram_id: str) -> UserPreferences | None:
+    async with async_session() as session:
+        result = await session.execute(select(UserPreferences).where(UserPreferences.telegram_id == telegram_id))
+        return result.scalars().first()
+
+
+async def save_user_prefs(
+    telegram_id: str,
+    first_name: str,
+    selected_athkar: list[str],
+    frequency: str,
+    language: str,
+    delivery_mode: str,
+    custom_frequency_minutes: int | None,
+    daily_goal_count: int | None,
+):
+    async with async_session() as session:
+        result = await session.execute(select(UserPreferences).where(UserPreferences.telegram_id == telegram_id))
+        user_prefs = result.scalars().first()
+
+        if user_prefs:
+            user_prefs.selected_athkar = json.dumps(selected_athkar)
+            user_prefs.frequency = frequency
+            user_prefs.language = language
+            user_prefs.delivery_mode = delivery_mode
+            user_prefs.custom_frequency_minutes = custom_frequency_minutes
+            user_prefs.daily_goal_count = daily_goal_count
+            user_prefs.updated_at = datetime.utcnow()
+        else:
+            user_prefs = UserPreferences(
+                telegram_id=telegram_id,
+                first_name=first_name,
+                selected_athkar=json.dumps(selected_athkar),
+                frequency=frequency,
+                language=language,
+                delivery_mode=delivery_mode,
+                custom_frequency_minutes=custom_frequency_minutes,
+                daily_goal_count=daily_goal_count,
+            )
+            session.add(user_prefs)
+
+        await session.commit()
+
+    if reminder_scheduler.running:
+        await rebuild_user_reminder_schedule()
+
+
+async def reset_user_prefs(telegram_id: str):
+    async with async_session() as session:
+        await session.execute(delete(UserPreferences).where(UserPreferences.telegram_id == telegram_id))
+        await session.commit()
+
+    rotation_state.pop(telegram_id, None)
+    if reminder_scheduler.running:
+        await rebuild_user_reminder_schedule()
+
+
+# ============================================================================
+# REMINDER ENGINE
+# ============================================================================
+
+async def send_user_reminder(telegram_id: str):
+    user_prefs = await get_user_prefs(telegram_id)
+    if not user_prefs or not user_prefs.is_active:
+        return
+
+    selected_ids = parse_selected(user_prefs.selected_athkar)
     if not selected_ids:
         return
 
@@ -307,22 +501,21 @@ async def send_user_reminder(telegram_id: str):
         if not item:
             return
         text_key = "text_en" if lang == "en" else "text_ar"
-        body = item[text_key]
-        await application.bot.send_message(chat_id=int(telegram_id), text=body)
+        await application.bot.send_message(chat_id=int(telegram_id), text=item[text_key])
 
     try:
         if mode == "batch":
             for athkar_id in selected_ids:
                 await send_one(athkar_id)
         else:
-            current_index = rotation_state.get(telegram_id, 0) % len(selected_ids)
-            await send_one(selected_ids[current_index])
-            rotation_state[telegram_id] = (current_index + 1) % len(selected_ids)
+            idx = rotation_state.get(telegram_id, 0) % len(selected_ids)
+            await send_one(selected_ids[idx])
+            rotation_state[telegram_id] = (idx + 1) % len(selected_ids)
     except Exception as e:
         logger.error("Failed sending reminder to user %s: %s", telegram_id, e)
 
 
-def clear_user_reminder_jobs():
+def clear_user_jobs():
     for job in reminder_scheduler.get_jobs():
         if job.id.startswith("user_reminder_"):
             reminder_scheduler.remove_job(job.id)
@@ -330,48 +523,32 @@ def clear_user_reminder_jobs():
 
 def add_user_jobs(user_prefs: UserPreferences):
     telegram_id = str(user_prefs.telegram_id)
-    frequency = user_prefs.frequency or "2x_daily"
+    frequency = user_prefs.frequency or "every_30_min"
 
-    # Interval-based schedules
-    interval_minutes = None
+    interval_seconds = None
     if frequency == "custom_interval" and user_prefs.custom_frequency_minutes:
-        interval_minutes = user_prefs.custom_frequency_minutes
-    elif frequency in FREQUENCY_OPTIONS and "minutes" in FREQUENCY_OPTIONS[frequency]:
-        interval_minutes = FREQUENCY_OPTIONS[frequency]["minutes"]
+        interval_seconds = user_prefs.custom_frequency_minutes * 60
+    elif frequency == "goal_per_day" and user_prefs.daily_goal_count:
+        interval_seconds = max(1, int(round(86400 / max(1, user_prefs.daily_goal_count))))
+    elif frequency in INTERVAL_PRESETS:
+        interval_seconds = INTERVAL_PRESETS[frequency]["minutes"] * 60
 
-    if interval_minutes:
-        reminder_scheduler.add_job(
-            send_user_reminder,
-            trigger=IntervalTrigger(minutes=interval_minutes, timezone=CAIRO_TZ),
-            args=[telegram_id],
-            id=f"user_reminder_interval_{telegram_id}",
-            replace_existing=True,
-            misfire_grace_time=60,
-        )
-        return
+    if not interval_seconds:
+        interval_seconds = 300
 
-    # Daily fixed-time schedules
-    time_list = FREQUENCY_OPTIONS.get(frequency, {}).get("times", ["09:00", "18:00"])
-    for idx, hhmm in enumerate(time_list):
-        try:
-            hour, minute = map(int, hhmm.split(":"))
-            reminder_scheduler.add_job(
-                send_user_reminder,
-                trigger=CronTrigger(hour=hour, minute=minute, timezone=CAIRO_TZ),
-                args=[telegram_id],
-                id=f"user_reminder_daily_{telegram_id}_{idx}",
-                replace_existing=True,
-                misfire_grace_time=300,
-            )
-        except Exception as e:
-            logger.error("Invalid daily time '%s' for user %s: %s", hhmm, telegram_id, e)
+    reminder_scheduler.add_job(
+        send_user_reminder,
+        trigger=IntervalTrigger(seconds=interval_seconds, timezone=CAIRO_TZ),
+        args=[telegram_id],
+        id=f"user_reminder_{telegram_id}",
+        replace_existing=True,
+        misfire_grace_time=60,
+    )
 
 
 async def rebuild_user_reminder_schedule():
-    """Rebuild all per-user reminder jobs from database state."""
     async with reminder_lock:
-        clear_user_reminder_jobs()
-
+        clear_user_jobs()
         async with async_session() as session:
             result = await session.execute(
                 select(UserPreferences).where(
@@ -381,21 +558,15 @@ async def rebuild_user_reminder_schedule():
             )
             users = result.scalars().all()
 
-        for user_prefs in users:
-            try:
-                selected = json.loads(user_prefs.selected_athkar or "[]")
-                if not selected:
-                    continue
-                add_user_jobs(user_prefs)
-            except Exception as e:
-                logger.error("Failed scheduling reminders for user %s: %s", user_prefs.telegram_id, e)
+        for user in users:
+            if parse_selected(user.selected_athkar):
+                add_user_jobs(user)
 
         total = len([j for j in reminder_scheduler.get_jobs() if j.id.startswith("user_reminder_")])
         logger.info("User reminder scheduler refreshed: %s jobs", total)
 
 
 async def start_user_reminder_scheduler():
-    """Start scheduler and load reminder jobs."""
     if not reminder_scheduler.running:
         reminder_scheduler.start()
 
@@ -416,395 +587,266 @@ async def stop_user_reminder_scheduler():
 
 
 # ============================================================================
-# DATABASE INITIALIZATION
+# UI ACTIONS
 # ============================================================================
 
-async def init_db():
-    """Initialize database tables and add new columns if missing."""
-    logger.info("Creating database tables...")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-        # Lightweight in-place schema updates for existing deployments.
-        await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS custom_frequency_minutes INTEGER"))
-        await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS delivery_mode VARCHAR DEFAULT 'rotating'"))
-        await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS language VARCHAR DEFAULT 'ar'"))
-
-    logger.info("Database tables ready")
-
-
-async def get_user_prefs(telegram_id: str) -> UserPreferences | None:
-    """Get user preferences from database."""
-    async with async_session() as session:
-        result = await session.execute(
-            select(UserPreferences).where(UserPreferences.telegram_id == str(telegram_id))
-        )
-        return result.scalars().first()
-
-
-async def save_user_prefs(
-    telegram_id: str,
-    first_name: str,
-    selected_athkar: list[str],
-    frequency: str,
-    language: str,
-    delivery_mode: str,
-    custom_frequency_minutes: int | None,
-):
-    """Save or update user preferences."""
-    async with async_session() as session:
-        user = await session.execute(
-            select(UserPreferences).where(UserPreferences.telegram_id == str(telegram_id))
-        )
-        user_prefs = user.scalars().first()
-
-        if user_prefs:
-            user_prefs.selected_athkar = json.dumps(selected_athkar)
-            user_prefs.frequency = frequency
-            user_prefs.language = language
-            user_prefs.delivery_mode = delivery_mode
-            user_prefs.custom_frequency_minutes = custom_frequency_minutes
-            user_prefs.updated_at = datetime.utcnow()
-        else:
-            user_prefs = UserPreferences(
-                telegram_id=str(telegram_id),
-                first_name=first_name,
-                selected_athkar=json.dumps(selected_athkar),
-                frequency=frequency,
-                language=language,
-                delivery_mode=delivery_mode,
-                custom_frequency_minutes=custom_frequency_minutes,
-            )
-            session.add(user_prefs)
-
-        await session.commit()
-        logger.info(
-            "Saved preferences for user %s: athkar=%s frequency=%s lang=%s mode=%s custom=%s",
-            telegram_id,
-            len(selected_athkar),
-            frequency,
-            language,
-            delivery_mode,
-            custom_frequency_minutes,
-        )
-
-    if reminder_scheduler.running:
-        await rebuild_user_reminder_schedule()
-
-
-# ============================================================================
-# UI BUILDERS
-# ============================================================================
-
-def build_main_menu(lang: str, has_prefs: bool) -> InlineKeyboardMarkup:
-    if has_prefs:
-        buttons = [
-            [InlineKeyboardButton(tr(lang, "btn_show"), callback_data="show_prefs")],
-            [InlineKeyboardButton(tr(lang, "btn_edit_athkar"), callback_data="edit_athkar")],
-            [InlineKeyboardButton(tr(lang, "btn_edit_freq"), callback_data="edit_frequency")],
-            [InlineKeyboardButton(tr(lang, "btn_change_lang"), callback_data="lang_menu")],
-        ]
+async def show_start_screen(target, context: ContextTypes.DEFAULT_TYPE, lang: str):
+    text_value = tr(lang, "start_bilingual")
+    keyboard = language_menu(lang)
+    if hasattr(target, "edit_message_text"):
+        await target.edit_message_text(text=text_value, reply_markup=keyboard)
     else:
-        buttons = [
-            [InlineKeyboardButton(tr(lang, "btn_lang"), callback_data="lang_menu")],
-            [InlineKeyboardButton(tr(lang, "btn_start_setup"), callback_data="select_athkar")],
-        ]
-    return InlineKeyboardMarkup(buttons)
+        await context.bot.send_message(chat_id=target.id, text=text_value, reply_markup=keyboard)
 
 
-def build_language_menu(lang: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(tr(lang, "lang_ar"), callback_data="set_lang_ar")],
-        [InlineKeyboardButton(tr(lang, "lang_en"), callback_data="set_lang_en")],
-        [InlineKeyboardButton(tr(lang, "btn_back"), callback_data="start")],
-    ])
-
-
-def build_athkar_menu(lang: str, selected_ids: list[str]) -> InlineKeyboardMarkup:
-    key = "en" if lang == "en" else "ar"
-    all_selected = len(selected_ids) == len(ATHKAR_OPTIONS)
-
-    buttons = []
-    buttons.append([
-        InlineKeyboardButton(
-            tr(lang, "btn_clear_all") if all_selected else tr(lang, "btn_select_all"),
-            callback_data="toggle_all_athkar",
-        )
-    ])
-
-    for athkar in ATHKAR_OPTIONS:
-        selected = "✓ " if athkar["id"] in selected_ids else "○ "
-        buttons.append([InlineKeyboardButton(f"{selected}{athkar[key]}", callback_data=f"toggle_athkar_{athkar['id']}")])
-
-    buttons.append([InlineKeyboardButton(tr(lang, "btn_continue"), callback_data="choose_frequency")])
-    buttons.append([InlineKeyboardButton(tr(lang, "btn_back"), callback_data="start")])
-    return InlineKeyboardMarkup(buttons)
-
-
-def build_frequency_menu(lang: str) -> InlineKeyboardMarkup:
-    ordered_ids = [
-        "every_1_min",
-        "every_5_min",
-        "every_30_min",
-        "hourly",
-        "1x_daily",
-        "2x_daily",
-        "3x_daily",
-    ]
-
-    buttons = []
-    for freq_id in ordered_ids:
-        option = FREQUENCY_OPTIONS[freq_id]
-        label = option["en"] if lang == "en" else option["ar"]
-        if "times" in option:
-            label = f"{label} ({', '.join(option['times'])})"
-        buttons.append([InlineKeyboardButton(label, callback_data=f"set_freq_{freq_id}")])
-
-    buttons.append([InlineKeyboardButton(tr(lang, "btn_custom_freq"), callback_data="custom_frequency")])
-    buttons.append([InlineKeyboardButton(tr(lang, "btn_back"), callback_data="select_athkar")])
-    return InlineKeyboardMarkup(buttons)
-
-
-def build_delivery_mode_menu(lang: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(tr(lang, "mode_batch"), callback_data="set_mode_batch")],
-        [InlineKeyboardButton(tr(lang, "mode_rotating"), callback_data="set_mode_rotating")],
-        [InlineKeyboardButton(tr(lang, "btn_back"), callback_data="choose_frequency")],
-    ])
-
-
-# ============================================================================
-# TELEGRAM HANDLERS
-# ============================================================================
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start command and landing menu."""
+async def show_home(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = str(user.id)
+    lang = get_user_lang_from_context(context)
 
-    user_prefs = await get_user_prefs(user_id)
-    lang = await get_user_language(user_id, context)
-
-    logger.info("/start command from user %s (%s)", user_id, user.first_name)
-
-    text_value = tr(lang, "welcome_existing", name=user.first_name) if user_prefs else tr(lang, "welcome_new", name=user.first_name)
-    keyboard = build_main_menu(lang, has_prefs=bool(user_prefs))
+    prefs = await get_user_prefs(user_id)
+    load_draft_from_prefs(context, prefs)
+    text_value = tr(lang, "welcome_existing") if prefs else tr(lang, "welcome_new")
+    kb = main_menu(lang, has_prefs=bool(prefs))
 
     if update.callback_query:
         await update.callback_query.answer()
-        await update.callback_query.edit_message_text(text=text_value, reply_markup=keyboard)
+        await update.callback_query.edit_message_text(text=text_value, reply_markup=kb)
     else:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text=text_value, reply_markup=keyboard)
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=text_value, reply_markup=kb)
 
 
-async def show_language_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    user_id = str(query.from_user.id)
-    lang = await get_user_language(user_id, context)
-    await query.edit_message_text(text=tr(lang, "choose_lang"), reply_markup=build_language_menu(lang))
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.clear()
+    context.user_data["lang"] = "ar"
+    if update.callback_query:
+        await update.callback_query.answer()
+        await show_start_screen(update.callback_query, context, "ar")
+    else:
+        await show_start_screen(update.effective_chat, context, "ar")
 
 
 async def set_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    user_id = str(query.from_user.id)
-    chosen = "en" if query.data.endswith("_en") else "ar"
-    context.user_data["lang"] = chosen
+    lang = "en" if query.data.endswith("_en") else "ar"
+    context.user_data["lang"] = lang
 
-    user_prefs = await get_user_prefs(user_id)
-    if user_prefs:
+    user_id = str(query.from_user.id)
+    prefs = await get_user_prefs(user_id)
+    if prefs:
         async with async_session() as session:
             result = await session.execute(select(UserPreferences).where(UserPreferences.telegram_id == user_id))
-            prefs = result.scalars().first()
-            if prefs:
-                prefs.language = chosen
-                prefs.updated_at = datetime.utcnow()
+            row = result.scalars().first()
+            if row:
+                row.language = lang
+                row.updated_at = datetime.utcnow()
                 await session.commit()
 
-        if reminder_scheduler.running:
-            await rebuild_user_reminder_schedule()
-
-    await query.edit_message_text(
-        text=tr(chosen, "lang_saved"),
-        reply_markup=build_main_menu(chosen, has_prefs=bool(user_prefs)),
-    )
+    await show_home(update, context)
 
 
-async def select_athkar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show Athkar selection menu."""
+async def edit_athkar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
     user_id = str(query.from_user.id)
-    lang = await get_user_language(user_id, context)
+    prefs = await get_user_prefs(user_id)
+    if "draft_selected" not in context.user_data:
+        load_draft_from_prefs(context, prefs)
+    lang = get_user_lang_from_context(context)
 
-    if "selected_athkar" not in context.user_data:
-        user_prefs = await get_user_prefs(user_id)
-        if user_prefs and user_prefs.selected_athkar:
-            context.user_data["selected_athkar"] = json.loads(user_prefs.selected_athkar)
-        else:
-            context.user_data["selected_athkar"] = []
-
-    selected = context.user_data["selected_athkar"]
     await query.edit_message_text(
-        text=tr(lang, "choose_athkar"),
-        reply_markup=build_athkar_menu(lang, selected),
+        text=f"{tr(lang, 'choose_athkar')}\n\n{tr(lang, 'save_hint')}",
+        reply_markup=athkar_menu(lang, context.user_data.get("draft_selected", [])),
     )
 
 
 async def toggle_athkar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Toggle one Athkar item."""
     query = update.callback_query
     await query.answer()
-
     athkar_id = query.data.replace("toggle_athkar_", "")
-    user_id = str(query.from_user.id)
-    lang = await get_user_language(user_id, context)
 
-    selected = context.user_data.setdefault("selected_athkar", [])
+    selected = context.user_data.setdefault("draft_selected", [])
     if athkar_id in selected:
         selected.remove(athkar_id)
     else:
         selected.append(athkar_id)
 
+    lang = get_user_lang_from_context(context)
     await query.edit_message_text(
-        text=tr(lang, "choose_athkar"),
-        reply_markup=build_athkar_menu(lang, selected),
+        text=f"{tr(lang, 'choose_athkar')}\n\n{tr(lang, 'save_hint')}",
+        reply_markup=athkar_menu(lang, selected),
     )
 
 
 async def toggle_all_athkar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Toggle between select-all and clear-all."""
     query = update.callback_query
     await query.answer()
 
-    user_id = str(query.from_user.id)
-    lang = await get_user_language(user_id, context)
-
-    selected = context.user_data.setdefault("selected_athkar", [])
+    selected = context.user_data.setdefault("draft_selected", [])
     all_ids = [a["id"] for a in ATHKAR_OPTIONS]
+    context.user_data["draft_selected"] = [] if len(selected) == len(all_ids) else all_ids
 
-    if len(selected) == len(all_ids):
-        context.user_data["selected_athkar"] = []
-    else:
-        context.user_data["selected_athkar"] = all_ids
-
+    lang = get_user_lang_from_context(context)
     await query.edit_message_text(
-        text=tr(lang, "choose_athkar"),
-        reply_markup=build_athkar_menu(lang, context.user_data["selected_athkar"]),
+        text=f"{tr(lang, 'choose_athkar')}\n\n{tr(lang, 'save_hint')}",
+        reply_markup=athkar_menu(lang, context.user_data["draft_selected"]),
     )
 
 
-async def choose_frequency(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show frequency selection menu."""
+async def choose_strategy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    lang = get_user_lang_from_context(context)
 
-    user_id = str(query.from_user.id)
-    lang = await get_user_language(user_id, context)
-
-    selected = context.user_data.get("selected_athkar", [])
+    selected = context.user_data.get("draft_selected", [])
     if not selected:
         await query.answer(tr(lang, "need_athkar"), show_alert=True)
         return
 
-    await query.edit_message_text(
-        text=tr(lang, "choose_freq"),
-        reply_markup=build_frequency_menu(lang),
-    )
+    await query.edit_message_text(text=tr(lang, "choose_strategy"), reply_markup=strategy_menu(lang))
 
 
-async def set_frequency(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Store selected predefined frequency and move to delivery mode selection."""
+async def choose_interval(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    lang = get_user_lang_from_context(context)
+    await query.edit_message_text(text=tr(lang, "choose_interval"), reply_markup=interval_menu(lang))
 
-    user_id = str(query.from_user.id)
-    lang = await get_user_language(user_id, context)
 
-    selected = context.user_data.get("selected_athkar", [])
-    if not selected:
-        await query.answer(tr(lang, "need_athkar"), show_alert=True)
+async def choose_goal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    lang = get_user_lang_from_context(context)
+    await query.edit_message_text(text=tr(lang, "choose_goal"), reply_markup=goal_menu(lang))
+
+
+async def set_interval(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    code = query.data.replace("set_interval_", "")
+    context.user_data["draft_frequency"] = code
+    context.user_data["draft_custom_minutes"] = None
+    context.user_data["draft_goal_count"] = None
+
+    lang = get_user_lang_from_context(context)
+    await query.edit_message_text(text=tr(lang, "choose_mode"), reply_markup=mode_menu(lang))
+
+
+async def set_goal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    code = query.data.replace("set_goal_", "")
+    count = GOAL_PRESETS.get(f"goal_{code}")
+    if not count:
         return
 
-    frequency = query.data.replace("set_freq_", "")
-    context.user_data["frequency"] = frequency
-    context.user_data["custom_frequency_minutes"] = None
+    context.user_data["draft_frequency"] = "goal_per_day"
+    context.user_data["draft_goal_count"] = count
+    context.user_data["draft_custom_minutes"] = None
 
-    await query.edit_message_text(
-        text=tr(lang, "choose_mode"),
-        reply_markup=build_delivery_mode_menu(lang),
-    )
+    lang = get_user_lang_from_context(context)
+    await query.edit_message_text(text=tr(lang, "choose_mode"), reply_markup=mode_menu(lang))
 
 
-async def ask_custom_frequency(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Prompt user for custom interval in minutes."""
+async def ask_custom_interval(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    context.user_data["awaiting_custom_kind"] = "interval"
+    lang = get_user_lang_from_context(context)
+    await query.edit_message_text(text=tr(lang, "prompt_custom_interval"))
 
-    user_id = str(query.from_user.id)
-    lang = await get_user_language(user_id, context)
 
-    context.user_data["awaiting_custom_frequency"] = True
-    await query.edit_message_text(
-        text=tr(lang, "custom_prompt"),
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(tr(lang, "btn_back"), callback_data="choose_frequency")]]),
-    )
+async def ask_custom_goal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    context.user_data["awaiting_custom_kind"] = "goal"
+    lang = get_user_lang_from_context(context)
+    await query.edit_message_text(text=tr(lang, "prompt_custom_goal"))
 
 
 async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle custom frequency input text when requested."""
-    user = update.effective_user
-    user_id = str(user.id)
-    lang = await get_user_language(user_id, context)
-
-    if not context.user_data.get("awaiting_custom_frequency"):
+    kind = context.user_data.get("awaiting_custom_kind")
+    if not kind:
         return
 
-    raw_text = (update.message.text or "").strip()
-    if not raw_text.isdigit():
-        await update.message.reply_text(tr(lang, "custom_invalid"))
+    lang = get_user_lang_from_context(context)
+    raw = (update.message.text or "").strip()
+    if not raw.isdigit():
+        await update.message.reply_text(tr(lang, "invalid_number"))
         return
 
-    minutes = int(raw_text)
-    if minutes < 1 or minutes > 1440:
-        await update.message.reply_text(tr(lang, "custom_invalid"))
-        return
+    num = int(raw)
+    if kind == "interval":
+        if num < 1 or num > 1440:
+            await update.message.reply_text(tr(lang, "invalid_number"))
+            return
+        context.user_data["draft_frequency"] = "custom_interval"
+        context.user_data["draft_custom_minutes"] = num
+        context.user_data["draft_goal_count"] = None
+    else:
+        if num < 1 or num > 10000:
+            await update.message.reply_text(tr(lang, "invalid_number"))
+            return
+        context.user_data["draft_frequency"] = "goal_per_day"
+        context.user_data["draft_goal_count"] = num
+        context.user_data["draft_custom_minutes"] = None
 
-    context.user_data["awaiting_custom_frequency"] = False
-    context.user_data["frequency"] = "custom_interval"
-    context.user_data["custom_frequency_minutes"] = minutes
+    context.user_data["awaiting_custom_kind"] = None
+    await update.message.reply_text(tr(lang, "choose_mode"), reply_markup=mode_menu(lang))
 
-    await update.message.reply_text(
-        tr(lang, "choose_mode"),
-        reply_markup=build_delivery_mode_menu(lang),
+
+async def set_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    context.user_data["draft_mode"] = "batch" if query.data.endswith("_batch") else "rotating"
+
+    lang = get_user_lang_from_context(context)
+    warn = compute_spam_warning(
+        selected_count=len(context.user_data.get("draft_selected", [])),
+        mode=context.user_data.get("draft_mode", "rotating"),
+        frequency=context.user_data.get("draft_frequency", "every_30_min"),
+        custom_minutes=context.user_data.get("draft_custom_minutes"),
+        goal_count=context.user_data.get("draft_goal_count"),
     )
 
+    text_value = tr(lang, "save_hint")
+    if warn:
+        text_value = f"{tr(lang, 'spam_warning')}\n\n{text_value}"
 
-async def set_delivery_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Finalize and save preferences."""
+    await query.edit_message_text(text=text_value, reply_markup=InlineKeyboardMarkup([
+        [InlineKeyboardButton(tr(lang, "btn_save"), callback_data="save_now")],
+        [InlineKeyboardButton(tr(lang, "btn_back"), callback_data="choose_strategy")],
+    ]))
+
+
+async def save_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
     user = query.from_user
     user_id = str(user.id)
-    lang = await get_user_language(user_id, context)
+    lang = get_user_lang_from_context(context)
 
-    selected = context.user_data.get("selected_athkar", [])
+    prefs = await get_user_prefs(user_id)
+    if "draft_selected" not in context.user_data:
+        load_draft_from_prefs(context, prefs)
+
+    selected = context.user_data.get("draft_selected", [])
     if not selected:
         await query.answer(tr(lang, "need_athkar"), show_alert=True)
         return
 
-    frequency = context.user_data.get("frequency")
-    if not frequency:
-        await query.answer(tr(lang, "choose_freq"), show_alert=True)
-        return
+    frequency = context.user_data.get("draft_frequency") or (prefs.frequency if prefs else "every_30_min")
+    custom_minutes = context.user_data.get("draft_custom_minutes")
+    goal_count = context.user_data.get("draft_goal_count")
+    mode = context.user_data.get("draft_mode") or (prefs.delivery_mode if prefs else "rotating")
 
-    delivery_mode = "batch" if query.data.endswith("_batch") else "rotating"
-    custom_minutes = context.user_data.get("custom_frequency_minutes")
+    if frequency != "custom_interval":
+        custom_minutes = None
+    if frequency != "goal_per_day":
+        goal_count = None
 
     await save_user_prefs(
         telegram_id=user_id,
@@ -812,112 +854,79 @@ async def set_delivery_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
         selected_athkar=selected,
         frequency=frequency,
         language=lang,
-        delivery_mode=delivery_mode,
+        delivery_mode=mode,
         custom_frequency_minutes=custom_minutes,
+        daily_goal_count=goal_count,
     )
 
-    selected_names = get_selected_athkar_names(selected, lang)
-    frequency_label = format_frequency_label(frequency, custom_minutes, lang)
-    mode_label = tr(lang, "mode_batch_label") if delivery_mode == "batch" else tr(lang, "mode_rotating_label")
-
-    summary = (
-        f"{tr(lang, 'saved')}\n\n"
-        f"{tr(lang, 'field_lang')}: {tr(lang, 'lang_en') if lang == 'en' else tr(lang, 'lang_ar')}\n"
-        f"{tr(lang, 'field_athkar')}:\n"
-        f"{chr(10).join(['- ' + name for name in selected_names])}\n\n"
-        f"{tr(lang, 'field_freq')}: {frequency_label}\n"
-        f"{tr(lang, 'field_mode')}: {mode_label}"
-    )
-
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton(tr(lang, "btn_show"), callback_data="show_prefs")],
-        [InlineKeyboardButton(tr(lang, "btn_edit_athkar"), callback_data="edit_athkar")],
-        [InlineKeyboardButton(tr(lang, "btn_edit_freq"), callback_data="edit_frequency")],
-    ])
-
-    await query.edit_message_text(text=summary, reply_markup=keyboard)
+    warn = compute_spam_warning(len(selected), mode, frequency, custom_minutes, goal_count)
+    summary = build_prefs_summary(lang, selected, frequency, custom_minutes, goal_count, mode, warn)
+    await query.edit_message_text(text=summary, reply_markup=main_menu(lang, has_prefs=True))
 
 
 async def show_prefs(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show current preferences."""
     query = update.callback_query
     await query.answer()
 
     user_id = str(query.from_user.id)
-    user_prefs = await get_user_prefs(user_id)
-    lang = await get_user_language(user_id, context)
+    prefs = await get_user_prefs(user_id)
+    lang = get_user_lang_from_context(context)
 
-    if not user_prefs or not user_prefs.selected_athkar:
-        text_value = tr(lang, "empty_athkar")
-        buttons = [[InlineKeyboardButton(tr(lang, "btn_start_setup"), callback_data="select_athkar")]]
-        await query.edit_message_text(text=text_value, reply_markup=InlineKeyboardMarkup(buttons))
+    if not prefs:
+        await query.edit_message_text(text=tr(lang, "empty_athkar"), reply_markup=main_menu(lang, has_prefs=False))
         return
 
-    selected_ids = json.loads(user_prefs.selected_athkar)
-    selected_names = get_selected_athkar_names(selected_ids, user_prefs.language or lang)
-    freq_label = format_frequency_label(user_prefs.frequency, user_prefs.custom_frequency_minutes, user_prefs.language or lang)
-    mode_label = tr(user_prefs.language or lang, "mode_batch_label") if user_prefs.delivery_mode == "batch" else tr(user_prefs.language or lang, "mode_rotating_label")
-    lang_label = tr(user_prefs.language or lang, "lang_en") if (user_prefs.language or lang) == "en" else tr(user_prefs.language or lang, "lang_ar")
+    selected = parse_selected(prefs.selected_athkar)
+    summary = build_prefs_summary(
+        lang=lang,
+        selected=selected,
+        frequency=prefs.frequency or "every_30_min",
+        custom_minutes=prefs.custom_frequency_minutes,
+        goal_count=prefs.daily_goal_count,
+        mode=prefs.delivery_mode or "rotating",
+        warn=compute_spam_warning(len(selected), prefs.delivery_mode or "rotating", prefs.frequency or "every_30_min", prefs.custom_frequency_minutes, prefs.daily_goal_count),
+    )
+    await query.edit_message_text(text=summary, reply_markup=main_menu(lang, has_prefs=True))
+
+
+def build_prefs_summary(lang: str, selected: list[str], frequency: str, custom_minutes: int | None, goal_count: int | None, mode: str, warn: bool) -> str:
+    names = get_selected_names(selected, lang)
+    mode_label = tr(lang, "mode_batch_label") if mode == "batch" else tr(lang, "mode_rotating_label")
+    plan_label = get_plan_label(lang, frequency, custom_minutes, goal_count)
+    lang_label = tr(lang, "lang_label_en") if lang == "en" else tr(lang, "lang_label_ar")
 
     text_value = (
-        f"{tr(user_prefs.language or lang, 'prefs_title')}\n\n"
-        f"{tr(user_prefs.language or lang, 'field_lang')}: {lang_label}\n\n"
-        f"{tr(user_prefs.language or lang, 'field_athkar')}:\n"
-        f"{chr(10).join(['- ' + name for name in selected_names])}\n\n"
-        f"{tr(user_prefs.language or lang, 'field_freq')}: {freq_label}\n"
-        f"{tr(user_prefs.language or lang, 'field_mode')}: {mode_label}"
+        f"{tr(lang, 'prefs_title')}\n\n"
+        f"{tr(lang, 'field_lang')}: {lang_label}\n\n"
+        f"{tr(lang, 'field_athkar')}:\n"
+        f"{chr(10).join(['- ' + n for n in names])}\n\n"
+        f"{tr(lang, 'field_plan')}: {plan_label}\n"
+        f"{tr(lang, 'field_mode')}: {mode_label}"
     )
-
-    buttons = [
-        [InlineKeyboardButton(tr(user_prefs.language or lang, "btn_edit_athkar"), callback_data="edit_athkar")],
-        [InlineKeyboardButton(tr(user_prefs.language or lang, "btn_edit_freq"), callback_data="edit_frequency")],
-        [InlineKeyboardButton(tr(user_prefs.language or lang, "btn_change_lang"), callback_data="lang_menu")],
-    ]
-    await query.edit_message_text(text=text_value, reply_markup=InlineKeyboardMarkup(buttons))
+    if warn:
+        text_value += f"\n\n{tr(lang, 'spam_warning')}"
+    return text_value
 
 
-async def edit_athkar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Edit Athkar selections for existing user."""
+async def reset_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
     user_id = str(query.from_user.id)
-    user_prefs = await get_user_prefs(user_id)
+    lang = get_user_lang_from_context(context)
 
-    if user_prefs and user_prefs.selected_athkar:
-        context.user_data["selected_athkar"] = json.loads(user_prefs.selected_athkar)
-    else:
-        context.user_data["selected_athkar"] = []
+    await reset_user_prefs(user_id)
+    context.user_data.clear()
+    context.user_data["lang"] = "ar"
 
-    await select_athkar(update, context)
-
-
-async def edit_frequency(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Edit frequency and delivery mode for existing user."""
-    query = update.callback_query
-    await query.answer()
-
-    user_id = str(query.from_user.id)
-    user_prefs = await get_user_prefs(user_id)
-    lang = await get_user_language(user_id, context)
-
-    if not user_prefs or not user_prefs.selected_athkar:
-        await query.answer(tr(lang, "need_athkar"), show_alert=True)
-        return
-
-    context.user_data["selected_athkar"] = json.loads(user_prefs.selected_athkar)
-    context.user_data["frequency"] = user_prefs.frequency
-    context.user_data["custom_frequency_minutes"] = user_prefs.custom_frequency_minutes
-
-    await choose_frequency(update, context)
+    await query.edit_message_text(text=f"{tr(lang, 'confirm_reset')}\n\n{tr(lang, 'reset_done')}")
+    await show_start_screen(query, context, "ar")
 
 
 # ============================================================================
-# WEB SERVER SETUP
+# WEB SERVER
 # ============================================================================
 
 async def handle_webhook(request):
-    """Handle Telegram webhook requests."""
     data = await request.json()
     update = Update.de_json(data, application.bot)
     await application.process_update(update)
@@ -925,7 +934,6 @@ async def handle_webhook(request):
 
 
 async def handle_root(request):
-    """Health check endpoint."""
     return web.Response(text="User side bot is running")
 
 
@@ -939,32 +947,32 @@ if not TOKEN:
 
 application = Application.builder().token(TOKEN).build()
 
-# Add handlers
 application.add_handler(CommandHandler("start", start))
-application.add_handler(CallbackQueryHandler(show_language_menu, pattern="^lang_menu$"))
 application.add_handler(CallbackQueryHandler(set_language, pattern="^set_lang_(ar|en)$"))
-application.add_handler(CallbackQueryHandler(select_athkar, pattern="^select_athkar$"))
+application.add_handler(CallbackQueryHandler(show_home, pattern="^home$"))
+application.add_handler(CallbackQueryHandler(show_prefs, pattern="^show_prefs$"))
+application.add_handler(CallbackQueryHandler(edit_athkar, pattern="^edit_athkar$"))
 application.add_handler(CallbackQueryHandler(toggle_all_athkar, pattern="^toggle_all_athkar$"))
 application.add_handler(CallbackQueryHandler(toggle_athkar, pattern="^toggle_athkar_"))
-application.add_handler(CallbackQueryHandler(choose_frequency, pattern="^choose_frequency$"))
-application.add_handler(CallbackQueryHandler(set_frequency, pattern="^set_freq_"))
-application.add_handler(CallbackQueryHandler(ask_custom_frequency, pattern="^custom_frequency$"))
-application.add_handler(CallbackQueryHandler(set_delivery_mode, pattern="^set_mode_(batch|rotating)$"))
-application.add_handler(CallbackQueryHandler(edit_athkar, pattern="^edit_athkar$"))
-application.add_handler(CallbackQueryHandler(edit_frequency, pattern="^edit_frequency$"))
-application.add_handler(CallbackQueryHandler(show_prefs, pattern="^show_prefs$"))
-application.add_handler(CallbackQueryHandler(start, pattern="^start$"))
+application.add_handler(CallbackQueryHandler(choose_strategy, pattern="^choose_strategy$|^edit_plan$"))
+application.add_handler(CallbackQueryHandler(choose_interval, pattern="^strategy_interval$"))
+application.add_handler(CallbackQueryHandler(choose_goal, pattern="^strategy_goal$"))
+application.add_handler(CallbackQueryHandler(set_interval, pattern="^set_interval_"))
+application.add_handler(CallbackQueryHandler(set_goal, pattern="^set_goal_"))
+application.add_handler(CallbackQueryHandler(ask_custom_interval, pattern="^custom_interval$"))
+application.add_handler(CallbackQueryHandler(ask_custom_goal, pattern="^custom_goal$"))
+application.add_handler(CallbackQueryHandler(set_mode, pattern="^set_mode_(batch|rotating)$"))
+application.add_handler(CallbackQueryHandler(save_now, pattern="^save_now$"))
+application.add_handler(CallbackQueryHandler(reset_all, pattern="^reset_all$"))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_input))
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Log errors from update handlers."""
     logger.error("Exception while handling an update: %s", context.error, exc_info=context.error)
 
 
 application.add_error_handler(error_handler)
 
-# Web app for webhook
 web_app = web.Application()
 web_app.router.add_get("/", handle_root)
 web_app.router.add_post("/webhook", handle_webhook)
