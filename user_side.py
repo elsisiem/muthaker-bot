@@ -166,19 +166,18 @@ GOAL_PRESETS = {
 
 TEXTS = {
     "ar": {
-        "start_bilingual": "مرحبًا بك في خدمة تذكيرات الأذكار.\nWelcome to Athkar Reminder Service.\n\nيرجى اختيار اللغة المفضلة / Please choose your preferred language:",
-        "welcome_existing": "تم تحميل إعداداتك. يمكنك المتابعة أو التعديل.",
-        "welcome_new": "ابدأ إعداداتك بالخطوات التالية.",
+        "start_bilingual": "اختر اللغة / Choose Language",
+        "welcome_existing": "أهلا وسهلا! ماذا تريد أن تفعل؟",
+        "welcome_new": "أهلا وسهلا! دعنا نعد تفضيلاتك.",
         "btn_ar": "العربية",
         "btn_en": "English",
-        "btn_show": "عرض الإعدادات",
-        "btn_edit_athkar": "تعديل الأذكار",
-        "btn_edit_plan": "تعديل خطة الإرسال",
-        "btn_prayer_athkar": "تذكير الأذكار حسب الصلاة",
-        "btn_reset": "إعادة الضبط الكامل",
-        "btn_back": "رجوع",
-        "btn_save": "حفظ",
-        "btn_continue": "متابعة",
+        "btn_show": "📋 عرض الإعدادات",
+        "btn_configure_athkar": "⚙️ إعداد الأذكار",
+        "btn_prayer_athkar": "🕌 تذكير الأذكار حسب الصلاة",
+        "btn_reset": "🔄 إعادة التعيين الكامل",
+        "btn_back": "◀️ رجوع",
+        "btn_save": "✅ حفظ",
+        "btn_continue": "✅ متابعة",
         "choose_athkar": "اختر الأذكار المطلوبة:",
         "btn_select_all": "تحديد الكل",
         "btn_clear_all": "إلغاء تحديد الكل",
@@ -224,19 +223,18 @@ TEXTS = {
         "prayer_disabled_done": "تم إيقاف تذكير الأذكار حسب الصلاة.",
     },
     "en": {
-        "start_bilingual": "مرحبًا بك في خدمة تذكيرات الأذكار.\nWelcome to Athkar Reminder Service.\n\nيرجى اختيار اللغة المفضلة / Please choose your preferred language:",
-        "welcome_existing": "Your settings are loaded. You can continue or edit.",
-        "welcome_new": "Start your setup with the following steps.",
-        "btn_ar": "Arabic",
+        "start_bilingual": "Choose Language / اختر اللغة",
+        "welcome_existing": "Welcome back! What would you like to do?",
+        "welcome_new": "Welcome! Let's set up your preferences.",
+        "btn_ar": "العربية",
         "btn_en": "English",
-        "btn_show": "View settings",
-        "btn_edit_athkar": "Edit Athkar",
-        "btn_edit_plan": "Edit delivery plan",
-        "btn_prayer_athkar": "Prayer-linked Athkar",
-        "btn_reset": "Reset everything",
-        "btn_back": "Back",
-        "btn_save": "Save",
-        "btn_continue": "Continue",
+        "btn_show": "📋 View Settings",
+        "btn_configure_athkar": "⚙️ Athkar Configuration",
+        "btn_prayer_athkar": "🕌 Prayer-linked Athkar",
+        "btn_reset": "🔄 Reset Everything",
+        "btn_back": "◀️ Back",
+        "btn_save": "✅ Save",
+        "btn_continue": "✅ Continue",
         "choose_athkar": "Choose your Athkar:",
         "btn_select_all": "Select all",
         "btn_clear_all": "Clear all",
@@ -385,13 +383,21 @@ def compute_spam_warning(selected_count: int, mode: str, frequency: str, custom_
 
 
 def main_menu(lang: str, has_prefs: bool) -> InlineKeyboardMarkup:
-    rows = [
-        [InlineKeyboardButton(tr(lang, "btn_show"), callback_data="show_prefs")],
-        [InlineKeyboardButton(tr(lang, "btn_edit_athkar"), callback_data="edit_athkar")],
-        [InlineKeyboardButton(tr(lang, "btn_edit_plan"), callback_data="edit_plan")],
-        [InlineKeyboardButton(tr(lang, "btn_prayer_athkar"), callback_data="toggle_prayer_athkar")],
-        [InlineKeyboardButton(tr(lang, "btn_reset"), callback_data="reset_all")],
-    ]
+    rows = []
+    
+    # Only show View Settings if user has existing preferences
+    if has_prefs:
+        rows.append([InlineKeyboardButton(tr(lang, "btn_show"), callback_data="show_prefs")])
+    
+    # Athkar Configuration (combines both athkar selection and delivery plan)
+    rows.append([InlineKeyboardButton(tr(lang, "btn_configure_athkar"), callback_data="edit_athkar")])
+    
+    # Prayer-linked Athkar
+    rows.append([InlineKeyboardButton(tr(lang, "btn_prayer_athkar"), callback_data="toggle_prayer_athkar")])
+    
+    # Reset at bottom
+    rows.append([InlineKeyboardButton(tr(lang, "btn_reset"), callback_data="reset_all")])
+    
     return InlineKeyboardMarkup(rows)
 
 
@@ -421,7 +427,6 @@ def athkar_menu(lang: str, selected: list[str]) -> InlineKeyboardMarkup:
         prefix = "✓ " if item["id"] in selected else "○ "
         rows.append([InlineKeyboardButton(prefix + item[key], callback_data=f"toggle_athkar_{item['id']}")])
 
-    rows.append([InlineKeyboardButton(tr(lang, "btn_save"), callback_data="save_now")])
     rows.append([InlineKeyboardButton(tr(lang, "btn_continue"), callback_data="choose_strategy")])
     rows.append([InlineKeyboardButton(tr(lang, "btn_back"), callback_data="home")])
     return InlineKeyboardMarkup(rows)
@@ -431,8 +436,7 @@ def strategy_menu(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(tr(lang, "btn_strategy_interval"), callback_data="strategy_interval")],
         [InlineKeyboardButton(tr(lang, "btn_strategy_goal"), callback_data="strategy_goal")],
-        [InlineKeyboardButton(tr(lang, "btn_save"), callback_data="save_now")],
-        [InlineKeyboardButton(tr(lang, "btn_back"), callback_data="home")],
+        [InlineKeyboardButton(tr(lang, "btn_back"), callback_data="edit_athkar")],
     ])
 
 
@@ -441,7 +445,6 @@ def interval_menu(lang: str) -> InlineKeyboardMarkup:
     for code in ["every_1_min", "every_5_min", "every_30_min", "hourly"]:
         rows.append([InlineKeyboardButton(INTERVAL_PRESETS[code]["en" if lang == "en" else "ar"], callback_data=f"set_interval_{code}")])
     rows.append([InlineKeyboardButton(tr(lang, "btn_custom_interval"), callback_data="custom_interval")])
-    rows.append([InlineKeyboardButton(tr(lang, "btn_save"), callback_data="save_now")])
     rows.append([InlineKeyboardButton(tr(lang, "btn_back"), callback_data="choose_strategy")])
     return InlineKeyboardMarkup(rows)
 
@@ -452,7 +455,6 @@ def goal_menu(lang: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("200", callback_data="set_goal_200")],
         [InlineKeyboardButton("300", callback_data="set_goal_300")],
         [InlineKeyboardButton(tr(lang, "btn_custom_goal"), callback_data="custom_goal")],
-        [InlineKeyboardButton(tr(lang, "btn_save"), callback_data="save_now")],
         [InlineKeyboardButton(tr(lang, "btn_back"), callback_data="choose_strategy")],
     ]
     return InlineKeyboardMarkup(rows)
@@ -462,7 +464,6 @@ def mode_menu(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(tr(lang, "mode_batch"), callback_data="set_mode_batch")],
         [InlineKeyboardButton(tr(lang, "mode_rotating"), callback_data="set_mode_rotating")],
-        [InlineKeyboardButton(tr(lang, "btn_save"), callback_data="save_now")],
         [InlineKeyboardButton(tr(lang, "btn_back"), callback_data="choose_strategy")],
     ])
 
@@ -1021,12 +1022,8 @@ async def toggle_prayer_athkar(update: Update, context: ContextTypes.DEFAULT_TYP
     lang = get_user_lang_from_context(context)
     prefs = await get_user_prefs(user_id)
 
-    if not prefs:
-        context.user_data["awaiting_prayer_location"] = True
-        await query.edit_message_text(text=tr(lang, "prayer_prompt_location"), reply_markup=location_request_keyboard(lang))
-        return
-
-    if prefs.prayer_athkar_enabled:
+    # Case 1: User is disabling prayer-linked athkar
+    if prefs and prefs.prayer_athkar_enabled:
         await save_user_prefs(
             telegram_id=user_id,
             first_name=user.first_name,
@@ -1038,14 +1035,25 @@ async def toggle_prayer_athkar(update: Update, context: ContextTypes.DEFAULT_TYP
             daily_goal_count=prefs.daily_goal_count,
             prayer_athkar_enabled=False,
         )
-        await query.edit_message_text(text=tr(lang, "prayer_disabled_done"), reply_markup=main_menu(lang, has_prefs=True))
+        await clear_prayer_jobs()
+        if reminder_scheduler.running:
+            await rebuild_user_reminder_schedule()
+        await query.edit_message_text(
+            text=tr(lang, "prayer_disabled_done"),
+            reply_markup=main_menu(lang, has_prefs=True)
+        )
         return
 
-    if prefs.latitude is None or prefs.longitude is None:
+    # Case 2: User doesn't have coordinates yet - ask for location
+    if not prefs or prefs.latitude is None or prefs.longitude is None:
         context.user_data["awaiting_prayer_location"] = True
-        await query.edit_message_text(text=tr(lang, "prayer_prompt_location"), reply_markup=location_request_keyboard(lang))
+        await query.edit_message_text(
+            text=tr(lang, "prayer_prompt_location"),
+            reply_markup=location_request_keyboard(lang)
+        )
         return
 
+    # Case 3: User has coordinates but prayer not enabled - enable it
     await save_user_prefs(
         telegram_id=user_id,
         first_name=user.first_name,
@@ -1061,9 +1069,12 @@ async def toggle_prayer_athkar(update: Update, context: ContextTypes.DEFAULT_TYP
         location_label=prefs.location_label,
         timezone_name=prefs.timezone,
     )
-    await rebuild_user_reminder_schedule()
-    await query.message.reply_text(tr(lang, "prayer_location_saved"), reply_markup=ReplyKeyboardRemove())
-    await query.edit_message_text(text=tr(lang, "welcome_existing"), reply_markup=main_menu(lang, has_prefs=True))
+    if reminder_scheduler.running:
+        await rebuild_user_reminder_schedule()
+    await query.edit_message_text(
+        text=tr(lang, "prayer_location_saved"),
+        reply_markup=main_menu(lang, has_prefs=True)
+    )
 
 
 async def handle_location_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1254,7 +1265,7 @@ application.add_handler(CallbackQueryHandler(show_prefs, pattern="^show_prefs$")
 application.add_handler(CallbackQueryHandler(edit_athkar, pattern="^edit_athkar$"))
 application.add_handler(CallbackQueryHandler(toggle_all_athkar, pattern="^toggle_all_athkar$"))
 application.add_handler(CallbackQueryHandler(toggle_athkar, pattern="^toggle_athkar_"))
-application.add_handler(CallbackQueryHandler(choose_strategy, pattern="^choose_strategy$|^edit_plan$"))
+application.add_handler(CallbackQueryHandler(choose_strategy, pattern="^choose_strategy$"))
 application.add_handler(CallbackQueryHandler(choose_interval, pattern="^strategy_interval$"))
 application.add_handler(CallbackQueryHandler(choose_goal, pattern="^strategy_goal$"))
 application.add_handler(CallbackQueryHandler(set_interval, pattern="^set_interval_"))
