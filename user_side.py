@@ -178,7 +178,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     telegram_id = str(user.id)
 
-    logger.info(f"👤 User {telegram_id} ({user.first_name}) started the bot")
+    logger.info("")
+    logger.info("=" * 60)
+    logger.info(f"👤 /START COMMAND RECEIVED")
+    logger.info(f"   User ID: {telegram_id}")
+    logger.info(f"   Name: {user.first_name}")
+    logger.info("=" * 60)
+    logger.info("")
 
     # Check if user already has preferences
     user_prefs = await get_user_prefs(telegram_id)
@@ -423,6 +429,12 @@ application.add_handler(CallbackQueryHandler(edit_athkar, pattern="^edit_athkar$
 application.add_handler(CallbackQueryHandler(edit_frequency, pattern="^edit_frequency$"))
 application.add_handler(CallbackQueryHandler(show_prefs, pattern="^show_prefs$"))
 application.add_handler(CallbackQueryHandler(start, pattern="^start$"))
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Log the error and send a message to the user"""
+    logger.error(f"💥 Exception while handling an update: {context.error}", exc_info=context.error)
+
+application.add_error_handler(error_handler)
 
 # Web app for webhook
 web_app = web.Application()
