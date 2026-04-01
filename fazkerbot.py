@@ -4,10 +4,9 @@ import pytz
 from datetime import datetime, timedelta
 import asyncio
 import aiohttp
-from telegram import Bot, InputMediaPhoto
+from telegram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.date import DateTrigger
-import json
 
 # Constants - all sensitive information from environment variables
 TOKEN = os.environ['TELEGRAM_BOT_TOKEN']
@@ -17,10 +16,24 @@ API_URL = "https://api.aladhan.com/v1/timingsByCity"
 COORDINATES_API_URL = "https://api.aladhan.com/v1/timings"
 API_PARAMS = {'city': 'Cairo', 'country': 'Egypt', 'method': 3}
 
-# Updated image URLs to use the working GitHub repository
+# Image URLs for channel posts
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/elsisiem/muthaker-bot/master"
-QURAN_PAGES_URL = f"{GITHUB_RAW_URL}/%D8%A7%D9%84%D9%85%D8%B5%D8%AD%D9%81"
 ATHKAR_URL = f"{GITHUB_RAW_URL}/%D8%A7%D9%84%D8%A3%D8%B0%D9%83%D8%A7%D8%B1"
+FASTING_IMAGES_DIR = os.path.join(os.path.dirname(__file__), "الصيام")
+
+# Weekly fasting reminders: Sunday -> Monday fast, Wednesday -> Thursday fast
+FASTING_REMINDER_CONFIG = {
+    6: {
+        "job_key": "monday",
+        "image": "صيام الإثنين.jpg",
+        "caption": "#صيام_الإثنين",
+    },
+    2: {
+        "job_key": "thursday",
+        "image": "صيام الخميس.jpg",
+        "caption": "#صيام_الخميس",
+    },
+}
 
 # Fallback prayer times for Cairo (approximate times that can be used when API fails)
 FALLBACK_PRAYER_TIMES = {
@@ -197,103 +210,6 @@ async def send_photo(chat_id, photo_url, caption=None):
         logger.error(f"Error sending photo: {e}")
         return None
 
-async def send_media_group(chat_id, media):
-    try:
-        logger.info(f"Sending media group to chat {chat_id}")
-        media_group = [InputMediaPhoto(media=item["media"], caption=item.get("caption")) for item in media]
-        messages = await bot.send_media_group(chat_id=chat_id, media=media_group)
-        logger.info(f"Successfully sent media group. Number of messages: {len(messages)}")
-        return [message.message_id for message in messages]
-    except Exception as e:
-        logger.error(f"Error in send_media_group: {e}")
-        return None
-
-async def delete_message(chat_id, message_id):
-    try:
-        await bot.delete_message(chat_id=chat_id, message_id=message_id)
-    except Exception as e:
-        logger.error(f"Error deleting message: {e}")
-
-async def find_previous_athkar(chat_id):
-    """Find the previous athkar message by searching recent messages"""
-    try:
-        messages = await bot.get_updates()
-        for update in messages:
-            if (update.channel_post and 
-                update.channel_post.chat.id == int(chat_id) and
-                update.channel_post.caption and
-                ("#أذكار_الصباح" in update.channel_post.caption or 
-                 "#أذكار_المساء" in update.channel_post.caption)):
-                return update.channel_post.message_id
-    except Exception as e:
-        logger.error(f"Error finding previous athkar: {e}")
-    return None
-
-def get_next_quran_pages():
-    """Calculate next Quran pages based on anchor date"""
-    # Recalibrated anchor to align with November 2nd, 2025 target (pages 248-249)
-    anchor_date = datetime(2025, 7, 2).date()  # New anchor date: July 2nd, 2025
-    anchor_page1 = 2  # Anchor page
-    anchor_page2 = 3  # Anchor page
-    total_pages = 604  # Maximum page number
-
-    today = datetime.now(CAIRO_TZ).date()
-    days_diff = (today - anchor_date).days
-    
-    logger.info(f"📅 Date: {today}")
-    logger.info(f"📅 Anchor date: {anchor_date}")
-    logger.info(f"📅 Days difference: {days_diff}")
-
-    # Increment pages by 2 per day
-    page1 = anchor_page1 + days_diff * 2
-    page2 = anchor_page2 + days_diff * 2
-
-    # Wrapping logic: if page exceeds total_pages, wrap around to 1.
-    def wrap(page):
-        if page <= 0:
-            # Handle negative pages by wrapping from the end
-            while page <= 0:
-                page += total_pages
-        elif page > total_pages:
-            # Handle pages beyond total by wrapping to beginning
-            page = ((page - 1) % total_pages) + 1
-        return page
-
-    page1 = wrap(page1)
-    page2 = wrap(page2)
-
-    logger.info(f"📖 Quran pages for {today}: {page1}-{page2}")
-    return int(page1), int(page2)
-
-def get_next_quran_pages_for_date(target_date):
-    """Calculate Quran pages for a specific date"""
-    anchor_date = datetime(2025, 7, 2).date()
-    anchor_page1 = 2
-    anchor_page2 = 3
-    total_pages = 604
-
-    days_diff = (target_date - anchor_date).days
-    
-    logger.info(f"📅 Target date: {target_date}")
-    logger.info(f"📅 Days difference from anchor: {days_diff}")
-
-    page1 = anchor_page1 + days_diff * 2
-    page2 = anchor_page2 + days_diff * 2
-
-    def wrap(page):
-        if page <= 0:
-            while page <= 0:
-                page += total_pages
-        elif page > total_pages:
-            page = ((page - 1) % total_pages) + 1
-        return page
-
-    page1 = wrap(page1)
-    page2 = wrap(page2)
-
-    logger.info(f"📖 Quran pages for {target_date}: {page1}-{page2}")
-    return int(page1), int(page2)
-
 async def send_athkar(athkar_type):
     """Send athkar without deletion logic"""
     logger.info(f"Sending {athkar_type} Athkar")
@@ -342,53 +258,54 @@ async def send_athkar(athkar_type):
         except Exception as retry_error:
             logger.error(f"Retry also failed for {athkar_type} athkar: {retry_error}")
 
-async def send_quran_pages(target_date=None):
-    """Send Quran pages for a specific date"""
-    logger.info("Sending Quran pages")
-    
-    if target_date is None:
-        target_date = datetime.now(CAIRO_TZ).date()
-    else:
-        if isinstance(target_date, datetime):
-            target_date = target_date.date()
-    
-    page1, page2 = get_next_quran_pages_for_date(target_date)
-    page_1_url = f"{QURAN_PAGES_URL}/photo_{page1}.jpg"
-    page_2_url = f"{QURAN_PAGES_URL}/photo_{page2}.jpg"
-    
-    logger.info(f"Sending Quran pages {page1}-{page2} for {target_date}")
-    
-    # Validate URLs first
-    async with aiohttp.ClientSession() as session:
-        for i, url in enumerate([page_1_url, page_2_url], 1):
-            try:
-                async with session.get(url, timeout=10) as response:
-                    if response.status != 200:
-                        logger.error(f"Quran page {i} not found: {url} (status {response.status})")
-                        return
-                    content = await response.content.read(10)
-                    if not content.startswith(b'\xff\xd8'):
-                        logger.error(f"Invalid image format for page {i}: {url}")
-                        return
-                    logger.info(f"Page {i} validated")
-            except Exception as e:
-                logger.error(f"Error validating Quran page {i}: {e}")
-                return
-    
-    media = [
-        {"type": "photo", "media": page_1_url},
-        {"type": "photo", "media": page_2_url, "caption": "ورد اليوم"}
-    ]
-    
+async def send_fasting_reminder(reminder_key):
+    """Send Sunday/Wednesday fasting reminder image posts."""
+    config = None
+    for item in FASTING_REMINDER_CONFIG.values():
+        if item["job_key"] == reminder_key:
+            config = item
+            break
+
+    if not config:
+        logger.error(f"Unknown fasting reminder key: {reminder_key}")
+        return
+
+    image_path = os.path.join(FASTING_IMAGES_DIR, config["image"])
+    if not os.path.exists(image_path):
+        logger.error(f"Fasting reminder image not found: {image_path}")
+        return
+
     try:
-        message_ids = await send_media_group(CHAT_ID, media)
-        
-        if message_ids:
-            logger.info(f"Successfully sent Quran pages {page1}-{page2}")
-        else:
-            logger.error(f"Failed to send Quran pages {page1}-{page2}")
+        with open(image_path, "rb") as photo_file:
+            message = await bot.send_photo(
+                chat_id=CHAT_ID,
+                photo=photo_file,
+                caption=config["caption"]
+            )
+        logger.info(f"Fasting reminder sent ({reminder_key}): {message.message_id}")
     except Exception as e:
-        logger.error(f"Error sending Quran pages {page1}-{page2}: {e}")
+        logger.error(f"Failed to send fasting reminder ({reminder_key}): {e}")
+
+def parse_prayer_time_for_date(prayer, target_date, prayer_times_data):
+    """Parse HH:MM and HH:MM (+TZ) prayer strings into localized Cairo datetimes."""
+    try:
+        raw_time = prayer_times_data.get(prayer)
+        if not raw_time:
+            logger.error(f"Missing prayer time for {prayer} on {target_date}")
+            return None
+
+        clean_time = raw_time.split(" ")[0]
+        if len(clean_time.split(':')) != 2:
+            logger.error(f"Invalid time format for {prayer}: {raw_time}")
+            return None
+
+        hour, minute = map(int, clean_time.split(':'))
+        prayer_time = datetime.combine(target_date, datetime.min.time().replace(hour=hour, minute=minute))
+        localized_time = CAIRO_TZ.localize(prayer_time)
+        return localized_time
+    except Exception as e:
+        logger.error(f"Error parsing prayer time for {prayer} on {target_date}: {e}")
+        return None
 
 DAILY_TASKS = []  # Global list to store all scheduled tasks for the day
 
@@ -404,16 +321,18 @@ async def schedule_fallback_tasks(now, today, tomorrow):
 
     fajr_today = parse_time(today, FALLBACK_PRAYER_TIMES['Fajr'])
     asr_today = parse_time(today, FALLBACK_PRAYER_TIMES['Asr'])
+    isha_today = parse_time(today, FALLBACK_PRAYER_TIMES['Isha'])
     morning_today = fajr_today + timedelta(minutes=35)
     evening_today = asr_today + timedelta(minutes=30)
-    quran_today = evening_today + timedelta(minutes=10)
+    fasting_today = isha_today + timedelta(minutes=30)
 
     # If a slot already passed, queue the same slot for tomorrow.
     fajr_tomorrow = parse_time(tomorrow, FALLBACK_PRAYER_TIMES['Fajr'])
     asr_tomorrow = parse_time(tomorrow, FALLBACK_PRAYER_TIMES['Asr'])
+    isha_tomorrow = parse_time(tomorrow, FALLBACK_PRAYER_TIMES['Isha'])
     morning_tomorrow = fajr_tomorrow + timedelta(minutes=35)
     evening_tomorrow = asr_tomorrow + timedelta(minutes=30)
-    quran_tomorrow = evening_tomorrow + timedelta(minutes=10)
+    fasting_tomorrow = isha_tomorrow + timedelta(minutes=30)
 
     DAILY_TASKS.append({
         'type': 'morning_athkar',
@@ -421,23 +340,21 @@ async def schedule_fallback_tasks(now, today, tomorrow):
         'description': '🌅 Morning Athkar (fallback)'
     })
 
-    evening_task_time = evening_today if evening_today > now else evening_tomorrow
-    quran_task_time = quran_today if quran_today > now else quran_tomorrow
-    quran_task_date = today if quran_today > now else tomorrow
-    quran_pages = get_next_quran_pages_for_date(quran_task_date)
+    DAILY_TASKS.append({
+        'type': 'evening_athkar',
+        'time': evening_today if evening_today > now else evening_tomorrow,
+        'description': '🌙 Evening Athkar (fallback)'
+    })
 
-    DAILY_TASKS.extend([
-        {
-            'type': 'evening_athkar',
-            'time': evening_task_time,
-            'description': '🌙 Evening Athkar (fallback)'
-        },
-        {
-            'type': 'quran',
-            'time': quran_task_time,
-            'description': f'📖 Quran Pages {quran_pages[0]}-{quran_pages[1]} (fallback)'
-        }
-    ])
+    for day, candidate_time in ((today, fasting_today), (tomorrow, fasting_tomorrow)):
+        config = FASTING_REMINDER_CONFIG.get(day.weekday())
+        if config and candidate_time > now:
+            DAILY_TASKS.append({
+                'type': 'fasting_reminder',
+                'time': candidate_time,
+                'reminder_key': config['job_key'],
+                'description': f"🥗 Fasting Reminder {config['caption']} (fallback)"
+            })
 
     for task in DAILY_TASKS:
         if task['type'] == 'morning_athkar':
@@ -458,12 +375,12 @@ async def schedule_fallback_tasks(now, today, tomorrow):
                 replace_existing=True,
                 misfire_grace_time=300
             )
-        elif task['type'] == 'quran':
+        elif task['type'] == 'fasting_reminder':
             scheduler.add_job(
-                send_quran_pages,
+                send_fasting_reminder,
                 trigger=DateTrigger(run_date=task['time'], timezone=CAIRO_TZ),
-                args=[task['time'].date()],
-                id=f"quran_pages_{task['time'].strftime('%Y%m%d')}",
+                args=[task['reminder_key']],
+                id=f"fasting_{task['reminder_key']}_{task['time'].strftime('%Y%m%d')}",
                 replace_existing=True,
                 misfire_grace_time=300
             )
@@ -487,152 +404,59 @@ async def schedule_tasks():
         logger.info(f"Today: {today}")
         logger.info(f"Tomorrow: {tomorrow}")
 
-        # Fetch prayer times for today with new fallback system
         prayer_times_today = await fetch_prayer_times(today)
         if not prayer_times_today:
             logger.error("Failed to fetch today's prayer times even with fallback, using conservative scheduling")
-            # Use conservative fallback scheduling
+            await schedule_fallback_tasks(now, today, tomorrow)
+            return
+
+        prayer_times_tomorrow = await fetch_prayer_times(tomorrow)
+        if not prayer_times_tomorrow:
+            logger.error("Failed to fetch tomorrow's prayer times, using conservative fallback")
             await schedule_fallback_tasks(now, today, tomorrow)
             return
 
         logger.info("Today's prayer times fetched successfully")
-        
-        # Log prayer times for verification
         for prayer, time in prayer_times_today.items():
             if prayer in ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha']:
                 logger.info(f"  {prayer}: {time}")
 
-        def get_prayer_time(prayer, target_date, prayer_times_data):
-            try:
-                time_str = prayer_times_data[prayer]
-                if not time_str or len(time_str.split(':')) != 2:
-                    logger.error(f"Invalid time format for {prayer}: {time_str}")
-                    return None
-                
-                hour, minute = map(int, time_str.split(':'))
-                prayer_time = datetime.combine(target_date, datetime.min.time().replace(hour=hour, minute=minute))
-                localized_time = CAIRO_TZ.localize(prayer_time)
-                logger.info(f"Parsed {prayer} time for {target_date}: {localized_time}")
-                return localized_time
-            except Exception as e:
-                logger.error(f"Error parsing prayer time for {prayer} on {target_date}: {e}")
-                return None
+        for day, prayer_times in ((today, prayer_times_today), (tomorrow, prayer_times_tomorrow)):
+            fajr_time = parse_prayer_time_for_date('Fajr', day, prayer_times)
+            asr_time = parse_prayer_time_for_date('Asr', day, prayer_times)
+            isha_time = parse_prayer_time_for_date('Isha', day, prayer_times)
 
-        # Calculate today's prayer times
-        fajr_time_today = get_prayer_time('Fajr', today, prayer_times_today)
-        asr_time_today = get_prayer_time('Asr', today, prayer_times_today)
-        
-        if not fajr_time_today or not asr_time_today:
-            logger.error("Critical prayer times are invalid for today, cannot schedule tasks")
-            return
+            if not fajr_time or not asr_time or not isha_time:
+                logger.error(f"Skipping schedule for {day}: missing Fajr/Asr/Isha")
+                continue
 
-        logger.info(f"Using today's prayer times - Fajr: {fajr_time_today}, Asr: {asr_time_today}")
-        
-        # Calculate today's task times
-        morning_athkar_time = fajr_time_today + timedelta(minutes=35)
-        evening_athkar_time = asr_time_today + timedelta(minutes=30)
-        quran_time = evening_athkar_time + timedelta(minutes=10)
+            morning_athkar_time = fajr_time + timedelta(minutes=35)
+            evening_athkar_time = asr_time + timedelta(minutes=30)
 
-        logger.info(f"Initial calculated times for today:")
-        logger.info(f"Morning Athkar: {morning_athkar_time}")
-        logger.info(f"Evening Athkar: {evening_athkar_time}")
-        logger.info(f"Quran time: {quran_time}")
-
-        # Check if we need tomorrow's prayer times
-        need_tomorrow_times = False
-        tasks_for_tomorrow = []
-
-        # Handle morning athkar scheduling
-        if morning_athkar_time <= now:
-            need_tomorrow_times = True
-            tasks_for_tomorrow.append('morning_athkar')
-            logger.info("Morning athkar time has passed, will schedule for tomorrow")
-        else:
-            DAILY_TASKS.append({
-                'type': 'morning_athkar',
-                'time': morning_athkar_time,
-                'description': '🌅 Morning Athkar'
-            })
-
-        # Handle evening tasks scheduling
-        if evening_athkar_time <= now:
-            need_tomorrow_times = True
-            tasks_for_tomorrow.extend(['evening_athkar', 'quran'])
-            logger.info("Evening athkar time has passed, will schedule evening tasks for tomorrow")
-        elif quran_time <= now:
-            need_tomorrow_times = True
-            tasks_for_tomorrow.append('quran')
-            logger.info("Quran time has passed, will schedule for tomorrow")
-            # Add today's evening athkar
-            DAILY_TASKS.append({
-                'type': 'evening_athkar',
-                'time': evening_athkar_time,
-                'description': '🌙 Evening Athkar'
-            })
-        else:
-            # Add both evening tasks for today
-            today_pages = get_next_quran_pages_for_date(today)
-            DAILY_TASKS.extend([
-                {
-                    'type': 'evening_athkar',
-                    'time': evening_athkar_time,
-                    'description': '🌙 Evening Athkar'
-                },
-                {
-                    'type': 'quran',
-                    'time': quran_time,
-                    'description': f'📖 Quran Pages {today_pages[0]}-{today_pages[1]}'
-                }
-            ])
-
-        # Fetch tomorrow's prayer times if needed
-        if need_tomorrow_times:
-            logger.info("Fetching tomorrow's prayer times...")
-            prayer_times_tomorrow = await fetch_prayer_times(tomorrow)
-            if not prayer_times_tomorrow:
-                logger.error("Failed to fetch tomorrow's prayer times")
-                return
-
-            fajr_time_tomorrow = get_prayer_time('Fajr', tomorrow, prayer_times_tomorrow)
-            asr_time_tomorrow = get_prayer_time('Asr', tomorrow, prayer_times_tomorrow)
-            
-            if not fajr_time_tomorrow or not asr_time_tomorrow:
-                logger.error("Critical prayer times are invalid for tomorrow")
-                return
-
-            logger.info(f"Tomorrow's prayer times - Fajr: {fajr_time_tomorrow}, Asr: {asr_time_tomorrow}")
-
-            # Schedule tomorrow's tasks
-            if 'morning_athkar' in tasks_for_tomorrow:
-                morning_athkar_tomorrow = fajr_time_tomorrow + timedelta(minutes=35)
+            if morning_athkar_time > now:
                 DAILY_TASKS.append({
                     'type': 'morning_athkar',
-                    'time': morning_athkar_tomorrow,
-                    'description': '🌅 Morning Athkar'
+                    'time': morning_athkar_time,
+                    'description': f'🌅 Morning Athkar ({day})'
                 })
-                logger.info(f"Scheduled morning athkar for tomorrow: {morning_athkar_tomorrow}")
 
-            if 'evening_athkar' in tasks_for_tomorrow or 'quran' in tasks_for_tomorrow:
-                evening_athkar_tomorrow = asr_time_tomorrow + timedelta(minutes=30)
-                quran_time_tomorrow = evening_athkar_tomorrow + timedelta(minutes=10)
-                
-                if 'evening_athkar' in tasks_for_tomorrow:
-                    DAILY_TASKS.append({
-                        'type': 'evening_athkar',
-                        'time': evening_athkar_tomorrow,
-                        'description': '🌙 Evening Athkar'
-                    })
-                    logger.info(f"Scheduled evening athkar for tomorrow: {evening_athkar_tomorrow}")
+            if evening_athkar_time > now:
+                DAILY_TASKS.append({
+                    'type': 'evening_athkar',
+                    'time': evening_athkar_time,
+                    'description': f'🌙 Evening Athkar ({day})'
+                })
 
-                if 'quran' in tasks_for_tomorrow:
-                    # Calculate tomorrow's Quran pages using tomorrow's date
-                    tomorrow_pages = get_next_quran_pages_for_date(tomorrow)
+            reminder_config = FASTING_REMINDER_CONFIG.get(day.weekday())
+            if reminder_config:
+                fasting_reminder_time = isha_time + timedelta(minutes=30)
+                if fasting_reminder_time > now:
                     DAILY_TASKS.append({
-                        'type': 'quran',
-                        'time': quran_time_tomorrow,
-                        'description': f'📖 Quran Pages {tomorrow_pages[0]}-{tomorrow_pages[1]}'
+                        'type': 'fasting_reminder',
+                        'time': fasting_reminder_time,
+                        'reminder_key': reminder_config['job_key'],
+                        'description': f"🥗 Fasting Reminder {reminder_config['caption']} ({day})"
                     })
-                    logger.info(f"📖 Scheduled Quran pages {tomorrow_pages[0]}-{tomorrow_pages[1]} for {tomorrow}")
 
         # Schedule jobs
         for task in DAILY_TASKS:
@@ -654,13 +478,12 @@ async def schedule_tasks():
                     replace_existing=True,
                     misfire_grace_time=300
                 )
-            elif task['type'] == 'quran':
-                task_date = task['time'].date()
+            elif task['type'] == 'fasting_reminder':
                 scheduler.add_job(
-                    send_quran_pages,
+                    send_fasting_reminder,
                     trigger=DateTrigger(run_date=task['time'], timezone=CAIRO_TZ),
-                    args=[task_date],
-                    id=f"quran_pages_{task['time'].strftime('%Y%m%d')}",
+                    args=[task['reminder_key']],
+                    id=f"fasting_{task['reminder_key']}_{task['time'].strftime('%Y%m%d')}",
                     replace_existing=True,
                     misfire_grace_time=300
                 )
@@ -697,16 +520,7 @@ async def heartbeat():
 from aiohttp import web
 
 async def handle(request):
-    # Check if this is a test request
-    if request.path_info == '/test-quran':
-        try:
-            logger.info("🧪 Manual Quran test triggered via webhook")
-            await send_quran_pages()
-            return web.Response(text="Quran test sent!")
-        except Exception as e:
-            logger.error(f"Test failed: {e}")
-            return web.Response(text=f"Test failed: {e}", status=500)
-    
+    # Quran posting is paused for now.
     return web.Response(text="Bot is running!")
 
 def format_time_until(target_time, now):
@@ -743,10 +557,6 @@ async def log_status_message():
                     logger.info(f"   {task['description']} - {task_date} at {task_time}")
             else:
                 logger.info("📅 No tasks scheduled")
-            
-            # Show today's Quran pages
-            today_pages = get_next_quran_pages()
-            logger.info(f"📖 Today's Quran pages: {today_pages[0]}-{today_pages[1]}")
             
             logger.info("=" * 50)
     except Exception as e:
