@@ -7,10 +7,10 @@ import os
 import logging
 import json
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytz
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -21,10 +21,11 @@ from telegram.ext import (
 )
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, select, Text, text, delete
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float, select, Text, text, delete
 from sqlalchemy.orm import declarative_base
 from aiohttp import web
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
@@ -36,6 +37,11 @@ logging.getLogger('httpx').setLevel(logging.WARNING)
 logging.getLogger('apscheduler').setLevel(logging.WARNING)
 
 CAIRO_TZ = pytz.timezone("Africa/Cairo")
+ATHKAR_IMAGES_DIR = os.path.join(os.path.dirname(__file__), "الأذكار")
+PRAYER_AHKAR_OFFSETS = {
+    "morning": 35,
+    "evening": 30,
+}
 
 # ============================================================================
 # DATABASE SETUP
@@ -66,6 +72,10 @@ class UserPreferences(Base):
     delivery_mode = Column(String, default="rotating")
     language = Column(String, default="ar")
     timezone = Column(String, default="Africa/Cairo")
+    prayer_athkar_enabled = Column(Boolean, default=False)
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+    location_label = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -164,6 +174,7 @@ TEXTS = {
         "btn_show": "عرض الإعدادات",
         "btn_edit_athkar": "تعديل الأذكار",
         "btn_edit_plan": "تعديل خطة الإرسال",
+        "btn_prayer_athkar": "تذكير الأذكار حسب الصلاة",
         "btn_reset": "إعادة الضبط الكامل",
         "btn_back": "رجوع",
         "btn_save": "حفظ",
@@ -190,6 +201,9 @@ TEXTS = {
         "field_athkar": "الأذكار",
         "field_plan": "الخطة",
         "field_mode": "أسلوب الإرسال",
+        "field_prayer": "تذكير الأذكار حسب الصلاة",
+        "field_location": "الموقع",
+        "field_timezone": "المنطقة الزمنية",
         "empty_athkar": "لا توجد أذكار محددة بعد.",
         "confirm_reset": "سيتم حذف جميع إعداداتك والبدء من جديد.",
         "reset_done": "تمت إعادة الضبط الكامل. ابدأ من جديد.",
@@ -200,6 +214,14 @@ TEXTS = {
         "lang_label_en": "English",
         "spam_warning": "تنبيه: حسب إعداداتك، متوسط الإرسال أسرع من كل 30 ثانية وقد يكون مزعجًا.",
         "save_hint": "يمكنك الحفظ الآن دون إعادة إعداد بقية الخيارات.",
+        "prayer_enabled": "مفعّل",
+        "prayer_disabled": "غير مفعّل",
+        "prayer_prompt_location": "أرسل موقعك حتى أتمكن من حساب أوقات الصلاة المحلية لك.",
+        "btn_share_location": "مشاركة الموقع",
+        "prayer_location_saved": "تم حفظ الموقع وتفعيل تذكير الأذكار حسب الصلاة.",
+        "prayer_location_updated": "تم تحديث الموقع.",
+        "prayer_need_location": "أحتاج إلى موقعك قبل تفعيل تذكير الأذكار حسب الصلاة.",
+        "prayer_disabled_done": "تم إيقاف تذكير الأذكار حسب الصلاة.",
     },
     "en": {
         "start_bilingual": "مرحبًا بك في خدمة تذكيرات الأذكار.\nWelcome to Athkar Reminder Service.\n\nيرجى اختيار اللغة المفضلة / Please choose your preferred language:",
@@ -210,6 +232,7 @@ TEXTS = {
         "btn_show": "View settings",
         "btn_edit_athkar": "Edit Athkar",
         "btn_edit_plan": "Edit delivery plan",
+        "btn_prayer_athkar": "Prayer-linked Athkar",
         "btn_reset": "Reset everything",
         "btn_back": "Back",
         "btn_save": "Save",
@@ -236,6 +259,9 @@ TEXTS = {
         "field_athkar": "Athkar",
         "field_plan": "Plan",
         "field_mode": "Delivery mode",
+        "field_prayer": "Prayer-linked Athkar",
+        "field_location": "Location",
+        "field_timezone": "Timezone",
         "empty_athkar": "No Athkar selected yet.",
         "confirm_reset": "All your settings will be removed and setup will start over.",
         "reset_done": "Reset completed. Start again.",
@@ -246,6 +272,14 @@ TEXTS = {
         "lang_label_en": "English",
         "spam_warning": "Warning: with your settings, average sends are faster than every 30 seconds and may feel spammy.",
         "save_hint": "You can save now without reconfiguring other options.",
+        "prayer_enabled": "Enabled",
+        "prayer_disabled": "Disabled",
+        "prayer_prompt_location": "Share your location so I can calculate your local prayer times.",
+        "btn_share_location": "Share location",
+        "prayer_location_saved": "Location saved. Prayer-linked Athkar is now enabled.",
+        "prayer_location_updated": "Location updated.",
+        "prayer_need_location": "I need your location before I can enable prayer-linked Athkar.",
+        "prayer_disabled_done": "Prayer-linked Athkar has been disabled.",
     },
 }
 
@@ -288,6 +322,21 @@ def get_user_lang_from_context(context: ContextTypes.DEFAULT_TYPE) -> str:
 def get_selected_names(selected_ids: list[str], lang: str) -> list[str]:
     key = "en" if lang == "en" else "ar"
     return [a[key] for a in ATHKAR_OPTIONS if a["id"] in selected_ids]
+
+
+def get_prayer_status_label(lang: str, prefs: UserPreferences | None) -> str:
+    if not prefs or not prefs.prayer_athkar_enabled:
+        return tr(lang, "prayer_disabled")
+
+    if prefs.location_label:
+        location = prefs.location_label
+    elif prefs.latitude is not None and prefs.longitude is not None:
+        location = f"{prefs.latitude:.4f}, {prefs.longitude:.4f}"
+    else:
+        location = "N/A"
+
+    timezone_name = prefs.timezone or "Africa/Cairo"
+    return f"{tr(lang, 'prayer_enabled')} ({location}, {timezone_name})"
 
 
 def load_draft_from_prefs(context: ContextTypes.DEFAULT_TYPE, prefs: UserPreferences | None):
@@ -340,9 +389,19 @@ def main_menu(lang: str, has_prefs: bool) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(tr(lang, "btn_show"), callback_data="show_prefs")],
         [InlineKeyboardButton(tr(lang, "btn_edit_athkar"), callback_data="edit_athkar")],
         [InlineKeyboardButton(tr(lang, "btn_edit_plan"), callback_data="edit_plan")],
+        [InlineKeyboardButton(tr(lang, "btn_prayer_athkar"), callback_data="toggle_prayer_athkar")],
         [InlineKeyboardButton(tr(lang, "btn_reset"), callback_data="reset_all")],
     ]
     return InlineKeyboardMarkup(rows)
+
+
+def location_request_keyboard(lang: str) -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [[KeyboardButton(tr(lang, "btn_share_location"), request_location=True)]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+        selective=True,
+    )
 
 
 def language_menu(lang: str) -> InlineKeyboardMarkup:
@@ -420,6 +479,10 @@ async def init_db():
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS delivery_mode VARCHAR DEFAULT 'rotating'"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS language VARCHAR DEFAULT 'ar'"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS daily_goal_count INTEGER"))
+        await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS prayer_athkar_enabled BOOLEAN DEFAULT FALSE"))
+        await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION"))
+        await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION"))
+        await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS location_label VARCHAR"))
     logger.info("Database tables ready")
 
 
@@ -438,6 +501,11 @@ async def save_user_prefs(
     delivery_mode: str,
     custom_frequency_minutes: int | None,
     daily_goal_count: int | None,
+    prayer_athkar_enabled: bool | None = None,
+    latitude: float | None = None,
+    longitude: float | None = None,
+    location_label: str | None = None,
+    timezone_name: str | None = None,
 ):
     async with async_session() as session:
         result = await session.execute(select(UserPreferences).where(UserPreferences.telegram_id == telegram_id))
@@ -450,6 +518,16 @@ async def save_user_prefs(
             user_prefs.delivery_mode = delivery_mode
             user_prefs.custom_frequency_minutes = custom_frequency_minutes
             user_prefs.daily_goal_count = daily_goal_count
+            if prayer_athkar_enabled is not None:
+                user_prefs.prayer_athkar_enabled = prayer_athkar_enabled
+            if latitude is not None:
+                user_prefs.latitude = latitude
+            if longitude is not None:
+                user_prefs.longitude = longitude
+            if location_label is not None:
+                user_prefs.location_label = location_label
+            if timezone_name is not None:
+                user_prefs.timezone = timezone_name
             user_prefs.updated_at = datetime.utcnow()
         else:
             user_prefs = UserPreferences(
@@ -461,6 +539,11 @@ async def save_user_prefs(
                 delivery_mode=delivery_mode,
                 custom_frequency_minutes=custom_frequency_minutes,
                 daily_goal_count=daily_goal_count,
+                prayer_athkar_enabled=bool(prayer_athkar_enabled) if prayer_athkar_enabled is not None else False,
+                latitude=latitude,
+                longitude=longitude,
+                location_label=location_label,
+                timezone=timezone_name or "Africa/Cairo",
             )
             session.add(user_prefs)
 
@@ -515,9 +598,118 @@ async def send_user_reminder(telegram_id: str):
         logger.error("Failed sending reminder to user %s: %s", telegram_id, e)
 
 
+async def fetch_user_prayer_times(latitude: float, longitude: float, target_date):
+    date_str = target_date.strftime("%d-%m-%Y")
+    api_url = f"https://api.aladhan.com/v1/timings/{date_str}"
+    params = {"latitude": latitude, "longitude": longitude, "method": 3}
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(api_url, params=params, timeout=15) as response:
+                if response.status != 200:
+                    logger.error("Prayer API failed for %s with status %s", date_str, response.status)
+                    return None, None
+
+                data = await response.json()
+                timings = data.get("data", {}).get("timings")
+                timezone_name = data.get("data", {}).get("meta", {}).get("timezone") or "Africa/Cairo"
+                if not timings or not all(prayer in timings for prayer in ["Fajr", "Asr"]):
+                    logger.error("Prayer API missing required timings for %s", date_str)
+                    return None, None
+
+                return timings, timezone_name
+    except Exception as exc:
+        logger.error("Prayer API error for %s: %s", date_str, exc)
+        return None, None
+
+
+def parse_prayer_time_for_date(prayer: str, target_date, prayer_times_data: dict, timezone_name: str):
+    try:
+        raw_time = prayer_times_data.get(prayer)
+        if not raw_time:
+            return None
+
+        clean_time = raw_time.split(" ")[0]
+        hour, minute = map(int, clean_time.split(":"))
+        local_tz = pytz.timezone(timezone_name or "Africa/Cairo")
+        prayer_time = datetime.combine(target_date, datetime.min.time().replace(hour=hour, minute=minute))
+        return local_tz.localize(prayer_time)
+    except Exception as exc:
+        logger.error("Error parsing prayer time for %s on %s: %s", prayer, target_date, exc)
+        return None
+
+
+def clear_prayer_jobs():
+    for job in reminder_scheduler.get_jobs():
+        if job.id.startswith("prayer_reminder_"):
+            reminder_scheduler.remove_job(job.id)
+
+
+async def send_prayer_athkar(telegram_id: str, athkar_type: str):
+    filename = "أذكار_الصباح.jpg" if athkar_type == "morning" else "أذكار_المساء.jpg"
+    image_path = os.path.join(ATHKAR_IMAGES_DIR, filename)
+
+    if not os.path.exists(image_path):
+        logger.error("Prayer-linked athkar image not found: %s", image_path)
+        return
+
+    try:
+        with open(image_path, "rb") as photo_file:
+            await application.bot.send_photo(chat_id=int(telegram_id), photo=photo_file)
+    except Exception as exc:
+        logger.error("Failed sending prayer-linked athkar to user %s: %s", telegram_id, exc)
+
+
+async def add_prayer_jobs(user_prefs: UserPreferences):
+    if not user_prefs.prayer_athkar_enabled:
+        return
+    if user_prefs.latitude is None or user_prefs.longitude is None:
+        return
+
+    telegram_id = str(user_prefs.telegram_id)
+    now = datetime.now(CAIRO_TZ)
+    today = now.date()
+    tomorrow = today + timedelta(days=1)
+
+    candidates = {"morning": [], "evening": []}
+
+    for day in (today, tomorrow):
+        prayer_times, timezone_name = await fetch_user_prayer_times(user_prefs.latitude, user_prefs.longitude, day)
+        if not prayer_times:
+            continue
+
+        effective_timezone = timezone_name or user_prefs.timezone or "Africa/Cairo"
+        fajr_time = parse_prayer_time_for_date("Fajr", day, prayer_times, effective_timezone)
+        asr_time = parse_prayer_time_for_date("Asr", day, prayer_times, effective_timezone)
+        if not fajr_time or not asr_time:
+            continue
+
+        morning_time = fajr_time + timedelta(minutes=PRAYER_AHKAR_OFFSETS["morning"])
+        evening_time = asr_time + timedelta(minutes=PRAYER_AHKAR_OFFSETS["evening"])
+
+        if morning_time > now:
+            candidates["morning"].append((morning_time, effective_timezone))
+        if evening_time > now:
+            candidates["evening"].append((evening_time, effective_timezone))
+
+    for prayer_kind, prayer_candidates in candidates.items():
+        if not prayer_candidates:
+            continue
+
+        run_time, timezone_name = min(prayer_candidates, key=lambda item: item[0])
+        reminder_scheduler.add_job(
+            send_prayer_athkar,
+            trigger=DateTrigger(run_date=run_time, timezone=pytz.timezone(timezone_name or user_prefs.timezone or "Africa/Cairo")),
+            args=[telegram_id, prayer_kind],
+            id=f"prayer_reminder_{telegram_id}_{prayer_kind}",
+            replace_existing=True,
+            misfire_grace_time=300,
+        )
+
+
 def clear_user_jobs():
     for job in reminder_scheduler.get_jobs():
-        if job.id.startswith("user_reminder_"):
+        if job.id.startswith("user_reminder_") or job.id.startswith("prayer_reminder_"):
             reminder_scheduler.remove_job(job.id)
 
 
@@ -550,19 +742,15 @@ async def rebuild_user_reminder_schedule():
     async with reminder_lock:
         clear_user_jobs()
         async with async_session() as session:
-            result = await session.execute(
-                select(UserPreferences).where(
-                    UserPreferences.is_active == True,
-                    UserPreferences.selected_athkar.is_not(None),
-                )
-            )
+            result = await session.execute(select(UserPreferences).where(UserPreferences.is_active == True))
             users = result.scalars().all()
 
         for user in users:
             if parse_selected(user.selected_athkar):
                 add_user_jobs(user)
+            await add_prayer_jobs(user)
 
-        total = len([j for j in reminder_scheduler.get_jobs() if j.id.startswith("user_reminder_")])
+        total = len([j for j in reminder_scheduler.get_jobs() if j.id.startswith("user_reminder_") or j.id.startswith("prayer_reminder_")])
         logger.info("User reminder scheduler refreshed: %s jobs", total)
 
 
@@ -824,6 +1012,97 @@ async def set_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]))
 
 
+async def toggle_prayer_athkar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    user = query.from_user
+    user_id = str(user.id)
+    lang = get_user_lang_from_context(context)
+    prefs = await get_user_prefs(user_id)
+
+    if not prefs:
+        context.user_data["awaiting_prayer_location"] = True
+        await query.edit_message_text(text=tr(lang, "prayer_prompt_location"), reply_markup=location_request_keyboard(lang))
+        return
+
+    if prefs.prayer_athkar_enabled:
+        await save_user_prefs(
+            telegram_id=user_id,
+            first_name=user.first_name,
+            selected_athkar=parse_selected(prefs.selected_athkar),
+            frequency=prefs.frequency or "every_30_min",
+            language=lang,
+            delivery_mode=prefs.delivery_mode or "rotating",
+            custom_frequency_minutes=prefs.custom_frequency_minutes,
+            daily_goal_count=prefs.daily_goal_count,
+            prayer_athkar_enabled=False,
+        )
+        await query.edit_message_text(text=tr(lang, "prayer_disabled_done"), reply_markup=main_menu(lang, has_prefs=True))
+        return
+
+    if prefs.latitude is None or prefs.longitude is None:
+        context.user_data["awaiting_prayer_location"] = True
+        await query.edit_message_text(text=tr(lang, "prayer_prompt_location"), reply_markup=location_request_keyboard(lang))
+        return
+
+    await save_user_prefs(
+        telegram_id=user_id,
+        first_name=user.first_name,
+        selected_athkar=parse_selected(prefs.selected_athkar),
+        frequency=prefs.frequency or "every_30_min",
+        language=lang,
+        delivery_mode=prefs.delivery_mode or "rotating",
+        custom_frequency_minutes=prefs.custom_frequency_minutes,
+        daily_goal_count=prefs.daily_goal_count,
+        prayer_athkar_enabled=True,
+        latitude=prefs.latitude,
+        longitude=prefs.longitude,
+        location_label=prefs.location_label,
+        timezone_name=prefs.timezone,
+    )
+    await rebuild_user_reminder_schedule()
+    await query.message.reply_text(tr(lang, "prayer_location_saved"), reply_markup=ReplyKeyboardRemove())
+    await query.edit_message_text(text=tr(lang, "welcome_existing"), reply_markup=main_menu(lang, has_prefs=True))
+
+
+async def handle_location_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.location or not update.effective_user:
+        return
+
+    user = update.effective_user
+    user_id = str(user.id)
+    prefs = await get_user_prefs(user_id)
+    if not context.user_data.get("awaiting_prayer_location") and not (prefs and prefs.prayer_athkar_enabled):
+        return
+
+    latitude = update.message.location.latitude
+    longitude = update.message.location.longitude
+    location_label = f"{latitude:.4f}, {longitude:.4f}"
+    _, timezone_name = await fetch_user_prayer_times(latitude, longitude, datetime.now(CAIRO_TZ).date())
+    timezone_name = timezone_name or (prefs.timezone if prefs and prefs.timezone else "Africa/Cairo")
+
+    await save_user_prefs(
+        telegram_id=user_id,
+        first_name=user.first_name,
+        selected_athkar=parse_selected(prefs.selected_athkar) if prefs else [],
+        frequency=prefs.frequency if prefs else "every_30_min",
+        language=get_user_lang_from_context(context),
+        delivery_mode=prefs.delivery_mode if prefs else "rotating",
+        custom_frequency_minutes=prefs.custom_frequency_minutes if prefs else None,
+        daily_goal_count=prefs.daily_goal_count if prefs else None,
+        prayer_athkar_enabled=True,
+        latitude=latitude,
+        longitude=longitude,
+        location_label=location_label,
+        timezone_name=timezone_name,
+    )
+
+    context.user_data["awaiting_prayer_location"] = False
+    await rebuild_user_reminder_schedule()
+    await update.message.reply_text(tr(get_user_lang_from_context(context), "prayer_location_saved"), reply_markup=ReplyKeyboardRemove())
+
+
 async def save_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -863,7 +1142,18 @@ async def save_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     warn = compute_spam_warning(len(selected), mode, frequency, custom_minutes, goal_count)
-    summary = build_prefs_summary(lang, selected, frequency, custom_minutes, goal_count, mode, warn)
+    summary = build_prefs_summary(
+        lang,
+        selected,
+        frequency,
+        custom_minutes,
+        goal_count,
+        mode,
+        warn,
+        prayer_enabled=prefs.prayer_athkar_enabled if prefs else False,
+        location_label=prefs.location_label if prefs else None,
+        timezone_name=prefs.timezone if prefs else None,
+    )
     await query.edit_message_text(text=summary, reply_markup=main_menu(lang, has_prefs=True))
 
 
@@ -888,15 +1178,19 @@ async def show_prefs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         goal_count=prefs.daily_goal_count,
         mode=prefs.delivery_mode or "rotating",
         warn=compute_spam_warning(len(selected), prefs.delivery_mode or "rotating", prefs.frequency or "every_30_min", prefs.custom_frequency_minutes, prefs.daily_goal_count),
+        prayer_enabled=prefs.prayer_athkar_enabled,
+        location_label=prefs.location_label,
+        timezone_name=prefs.timezone,
     )
     await query.edit_message_text(text=summary, reply_markup=main_menu(lang, has_prefs=True))
 
 
-def build_prefs_summary(lang: str, selected: list[str], frequency: str, custom_minutes: int | None, goal_count: int | None, mode: str, warn: bool) -> str:
+def build_prefs_summary(lang: str, selected: list[str], frequency: str, custom_minutes: int | None, goal_count: int | None, mode: str, warn: bool, prayer_enabled: bool = False, location_label: str | None = None, timezone_name: str | None = None) -> str:
     names = get_selected_names(selected, lang)
     mode_label = tr(lang, "mode_batch_label") if mode == "batch" else tr(lang, "mode_rotating_label")
     plan_label = get_plan_label(lang, frequency, custom_minutes, goal_count)
     lang_label = tr(lang, "lang_label_en") if lang == "en" else tr(lang, "lang_label_ar")
+    prayer_label = tr(lang, "prayer_enabled") if prayer_enabled else tr(lang, "prayer_disabled")
 
     text_value = (
         f"{tr(lang, 'prefs_title')}\n\n"
@@ -904,8 +1198,11 @@ def build_prefs_summary(lang: str, selected: list[str], frequency: str, custom_m
         f"{tr(lang, 'field_athkar')}:\n"
         f"{chr(10).join(['- ' + n for n in names])}\n\n"
         f"{tr(lang, 'field_plan')}: {plan_label}\n"
-        f"{tr(lang, 'field_mode')}: {mode_label}"
+        f"{tr(lang, 'field_mode')}: {mode_label}\n"
+        f"{tr(lang, 'field_prayer')}: {prayer_label}"
     )
+    if prayer_enabled:
+        text_value += f"\n{tr(lang, 'field_location')}: {location_label or 'N/A'}\n{tr(lang, 'field_timezone')}: {timezone_name or 'Africa/Cairo'}"
     if warn:
         text_value += f"\n\n{tr(lang, 'spam_warning')}"
     return text_value
@@ -965,8 +1262,10 @@ application.add_handler(CallbackQueryHandler(set_goal, pattern="^set_goal_"))
 application.add_handler(CallbackQueryHandler(ask_custom_interval, pattern="^custom_interval$"))
 application.add_handler(CallbackQueryHandler(ask_custom_goal, pattern="^custom_goal$"))
 application.add_handler(CallbackQueryHandler(set_mode, pattern="^set_mode_(batch|rotating)$"))
+application.add_handler(CallbackQueryHandler(toggle_prayer_athkar, pattern="^toggle_prayer_athkar$"))
 application.add_handler(CallbackQueryHandler(save_now, pattern="^save_now$"))
 application.add_handler(CallbackQueryHandler(reset_all, pattern="^reset_all$"))
+application.add_handler(MessageHandler(filters.LOCATION, handle_location_input))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_input))
 
 
