@@ -1,12 +1,14 @@
 import asyncio
 import logging
 import os
+from datetime import datetime
 from aiohttp import web
+from telegram import Update
 
 # Channel bot imports
 from fazkerbot import (
-    bot as channel_bot,
     scheduler as channel_scheduler,
+    CAIRO_TZ,
     test_telegram_connection,
     test_prayer_times,
     log_status_message,
@@ -15,9 +17,9 @@ from fazkerbot import (
 )
 
 # User side imports
-from user_side import web_app, application, init_db, start_user_bot
+from user_side import web_app, application, init_db
 
-# Setup detailed logging
+# Setup logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -32,124 +34,106 @@ logging.getLogger('apscheduler').setLevel(logging.WARNING)
 
 async def run_channel_bot():
     """Run the channel posting bot (Quran + Athkar to channel)"""
-    logger.info("🌅 Initializing channel bot...")
+    logger.info("Initializing channel bot...")
 
-    # Test Telegram connection
-    logger.info("🔗 Testing Telegram connection...")
     await test_telegram_connection()
-    logger.info("✅ Telegram connection verified")
+    logger.info("Telegram connection verified")
 
-    # Test prayer times API
-    logger.info("📍 Testing prayer times API...")
     prayer_test_result = await test_prayer_times()
     if not prayer_test_result:
-        logger.warning("⚠️  Prayer times test failed - scheduling may have issues")
+        logger.warning("Prayer times test failed - scheduling may have issues")
     else:
-        logger.info("✅ Prayer times API verified")
+        logger.info("Prayer times API verified")
 
-    # Log initial status
-    logger.info("📋 Logging initial bot status...")
     await log_status_message()
 
-    # Start the scheduler
-    logger.info("📅 Starting scheduler...")
     channel_scheduler.start()
-    logger.info("✅ Scheduler running")
+    logger.info("Scheduler started")
 
-    # Schedule initial tasks
-    logger.info("⏰ Scheduling daily tasks...")
     await schedule_tasks()
-    logger.info("✅ Daily tasks scheduled")
+    logger.info("Daily tasks scheduled")
 
-    # Start heartbeat
-    logger.info("💓 Starting heartbeat monitor...")
     asyncio.create_task(heartbeat())
-    logger.info("✅ Channel bot fully initialized")
-    logger.info("")
+    logger.info("Channel bot initialized")
 
-    # Keep the channel bot running
+    last_scheduled_date = datetime.now(CAIRO_TZ).date()
+
     while True:
+        now = datetime.now(CAIRO_TZ)
+        current_date = now.date()
+
+        if current_date != last_scheduled_date:
+            logger.info(f"New day detected ({current_date}); refreshing schedules")
+            await schedule_tasks()
+            await log_status_message()
+            last_scheduled_date = current_date
+
         await asyncio.sleep(60)
 
 async def run_user_bot():
     """Run the user bot with polling to receive /start commands"""
-    logger.info("🤖 User bot polling starting...")
+    logger.info("User bot polling starting...")
     try:
-        # Initialize and start the application
         await application.initialize()
         await application.start()
 
-        # Start polling - this will handle updates concurrently
         await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
-        logger.info("✅ User bot polling active and receiving updates")
+        logger.info("User bot polling active")
 
-        # Keep polling running
         while True:
             await asyncio.sleep(60)
     except asyncio.CancelledError:
-        logger.info("🛑 User bot polling stopped")
-        await application.updater.stop()
+        logger.info("User bot polling stopped")
+        if application.updater and application.updater.running:
+            await application.updater.stop()
         await application.stop()
     except Exception as e:
-        logger.error(f"💥 Error in user bot polling: {e}", exc_info=True)
+        logger.error(f"Error in user bot polling: {e}", exc_info=True)
         raise
 
 async def main():
     """Main function to run all bot components concurrently."""
     try:
-        logger.info("")
-        logger.info("🎬 " + "=" * 56)
-        logger.info("🎬 MUTHAKER BOT - STARTING ALL COMPONENTS")
-        logger.info("🎬 " + "=" * 56)
-        logger.info("")
+        logger.info("=" * 60)
+        logger.info("MUTHAKER BOT - STARTING")
+        logger.info("=" * 60)
 
-        # Initialize database
-        logger.info("📦 Initializing user preferences database...")
         await init_db()
-        logger.info("✅ User preferences database initialized")
-        logger.info("")
+        logger.info("User database initialized")
 
-        # Start the channel posting bot
-        logger.info("📡 Starting channel posting bot...")
         channel_task = asyncio.create_task(run_channel_bot())
-        logger.info("✅ Channel bot task created")
-        logger.info("")
-
-        # Start the user bot with polling
-        logger.info("💬 Starting user bot polling...")
         user_bot_task = asyncio.create_task(run_user_bot())
-        logger.info("✅ User bot polling task created")
-        logger.info("")
 
-        # Start the web server for health checks
-        logger.info("🌐 Starting web server...")
         runner = web.AppRunner(web_app)
         await runner.setup()
         port = int(os.environ.get("PORT", 8080))
         site = web.TCPSite(runner, "0.0.0.0", port)
         await site.start()
-        logger.info(f"✅ Web server started on port {port}")
-        logger.info("")
+        logger.info(f"Web server started on port {port}")
 
-        logger.info("🎉 " + "=" * 56)
-        logger.info("🎉 ALL COMPONENTS STARTED SUCCESSFULLY")
-        logger.info("🎉 " + "=" * 56)
-        logger.info("")
-        logger.info("📊 Running:")
-        logger.info("   ✓ Channel Bot (Quran + Athkar → channel)")
-        logger.info("   ✓ User Bot Polling (listening for /start)")
-        logger.info("   ✓ Web Server (health check @ port " + str(port) + ")")
-        logger.info("")
+        logger.info("=" * 60)
+        logger.info("ALL COMPONENTS STARTED")
+        logger.info("- Channel Bot (Quran + Athkar)")
+        logger.info("- User Bot (listening for /start)")
+        logger.info(f"- Web Server (port {port})")
+        logger.info("=" * 60)
 
-        # Keep the event loop running
         while True:
-            await asyncio.sleep(3600)
+            if channel_task.done():
+                exc = channel_task.exception()
+                raise RuntimeError(f"Channel bot task stopped unexpectedly: {exc}")
+
+            if user_bot_task.done():
+                exc = user_bot_task.exception()
+                raise RuntimeError(f"User bot polling task stopped unexpectedly: {exc}")
+
+            await asyncio.sleep(30)
 
     except Exception as e:
-        logger.exception("💥 Fatal error in main execution")
+        logger.exception("Fatal error in main execution")
         raise
     finally:
-        logger.info("🛑 Shutting down...")
+        logger.info("Shutting down...")
         if channel_scheduler.running:
             channel_scheduler.shutdown()
 
@@ -157,7 +141,6 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("")
-        logger.info("👋 Application stopped by user")
+        logger.info("Application stopped by user")
     except Exception as e:
-        logger.critical(f"💀 Critical error: {e}", exc_info=True)
+        logger.critical(f"Critical error: {e}", exc_info=True)
