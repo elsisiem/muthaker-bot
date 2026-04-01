@@ -104,103 +104,77 @@ async def fetch_prayer_times_with_fallback(target_date=None):
 async def try_city_api(target_date, date_str):
     """Try the city-based API"""
     try:
-        # Build URL with date as path parameter
         api_url_with_date = f"{API_URL}/{date_str}"
         params = {
             'city': 'Cairo', 
             'country': 'Egypt', 
-            'method': 3  # Muslim World League
+            'method': 3
         }
         
-        logger.info(f"🔄 Trying city API for {date_str}")
-        logger.info(f"🌐 URL: {api_url_with_date}")
-        logger.info(f"🔧 Params: {params}")
+        logger.info(f"Fetching prayer times for {date_str} (city API)")
         
         async with aiohttp.ClientSession() as session:
             async with session.get(api_url_with_date, params=params, timeout=15) as response:
-                logger.info(f"🌐 City API response status: {response.status}")
                 
                 if response.status != 200:
                     response_text = await response.text()
-                    logger.error(f"City API failed with status {response.status}, response: {response_text[:200]}")
+                    logger.error(f"City API failed with status {response.status}")
                     return None
                     
                 data = await response.json()
-                logger.info(f"📅 City API response received successfully")
-                
-                # Log more details about the response
-                if 'data' in data and 'date' in data['data']:
-                    date_info = data['data']['date']
-                    logger.info(f"📅 API returned date: {date_info.get('readable', 'N/A')}")
-                    logger.info(f"📅 API gregorian date: {date_info.get('gregorian', {}).get('date', 'N/A')}")
                 
                 # Validate response date with relaxed validation
                 if not await validate_api_response(data, target_date):
                     logger.warning("City API date validation failed, but continuing...")
                 
                 timings = data.get('data', {}).get('timings')
-                if not timings:
-                    logger.error("City API missing timings data")
-                    return None
-                    
-                if not all(prayer in timings for prayer in ['Fajr', 'Asr']):
-                    logger.error(f"City API missing required prayers. Available: {list(timings.keys())}")
+                if not timings or not all(prayer in timings for prayer in ['Fajr', 'Asr']):
+                    logger.error(f"City API missing required prayer data")
                     return None
                 
-                logger.info(f"✅ City API success for {date_str}")
-                logger.info(f"🕌 Fajr: {timings.get('Fajr')}, Asr: {timings.get('Asr')}")
+                logger.info(f"City API success: Fajr {timings.get('Fajr')}, Asr {timings.get('Asr')}")
                 return timings
                 
     except Exception as e:
-        logger.error(f"❌ City API error for {date_str}: {e}")
+        logger.error(f"City API error: {e}")
         return None
 
 async def try_coordinates_api(target_date, date_str):
     """Try the coordinates-based API as backup"""
     try:
-        # Build URL with date as path parameter
         api_url_with_date = f"{COORDINATES_API_URL}/{date_str}"
         params = {
-            'latitude': 30.0444,  # Cairo coordinates
+            'latitude': 30.0444,
             'longitude': 31.2357,
-            'method': 3  # Muslim World League
+            'method': 3
         }
         
-        logger.info(f"🔄 Trying coordinates API for {date_str}")
-        logger.info(f"🌐 URL: {api_url_with_date}")
-        logger.info(f"🔧 Params: {params}")
+        logger.info(f"Fetching prayer times for {date_str} (coordinates API)")
         
         async with aiohttp.ClientSession() as session:
             async with session.get(api_url_with_date, params=params, timeout=15) as response:
-                logger.info(f"🌐 Coordinates API response status: {response.status}")
                 
                 if response.status != 200:
                     response_text = await response.text()
-                    logger.error(f"Coordinates API failed with status {response.status}, response: {response_text[:200]}")
+                    logger.error(f"Coordinates API failed with status {response.status}")
                     return None
                     
                 data = await response.json()
-                logger.info(f"📅 Coordinates API response received successfully")
                 
                 # Validate response date with relaxed validation
                 if not await validate_api_response(data, target_date):
                     logger.warning("Coordinates API date validation failed, but continuing...")
                 
                 timings = data.get('data', {}).get('timings')
-                if not timings:
-                    logger.error("Coordinates API missing timings data")
-                    return None
-                    
-                if not all(prayer in timings for prayer in ['Fajr', 'Asr']):
-                    logger.error(f"Coordinates API missing required prayers. Available: {list(timings.keys())}")
+                if not timings or not all(prayer in timings for prayer in ['Fajr', 'Asr']):
+                    logger.error(f"Coordinates API missing required prayer data")
                     return None
                 
-                logger.info(f"✅ Coordinates API success for {date_str}")
-                logger.info(f"🕌 Fajr: {timings.get('Fajr')}, Asr: {timings.get('Asr')}")
+                logger.info(f"Coordinates API success: Fajr {timings.get('Fajr')}, Asr {timings.get('Asr')}")
                 return timings
                 
     except Exception as e:
-        logger.error(f"❌ Coordinates API error for {date_str}: {e}")
+        logger.error(f"Coordinates API error: {e}")
         return None
 
 async def fetch_prayer_times(target_date=None):
@@ -322,9 +296,8 @@ def get_next_quran_pages_for_date(target_date):
 
 async def send_athkar(athkar_type):
     """Send athkar without deletion logic"""
-    logger.info(f"🌅 Sending {athkar_type} Athkar")
+    logger.info(f"Sending {athkar_type} Athkar")
     
-    # No caption for athkar messages
     caption = None  
     image_url = f"{ATHKAR_URL}/{'أذكار_الصباح' if athkar_type == 'morning' else 'أذكار_المساء'}.jpg"
     
@@ -333,18 +306,17 @@ async def send_athkar(athkar_type):
         async with aiohttp.ClientSession() as session:
             async with session.get(image_url, timeout=10) as response:
                 if response.status != 200:
-                    logger.error(f"❌ Athkar image not accessible: {image_url} (status {response.status})")
+                    logger.error(f"Athkar image not accessible: {image_url} (status {response.status})")
                     return
                 content = await response.content.read(10)
                 if not content.startswith(b'\xff\xd8'):
-                    logger.error(f"❌ Invalid image format for athkar: {image_url}")
+                    logger.error(f"Invalid image format for athkar: {image_url}")
                     return
     except Exception as e:
-        logger.error(f"❌ Error validating athkar image URL {image_url}: {e}")
+        logger.error(f"Error validating athkar image URL: {e}")
         return
     
     try:
-        # Send the athkar image
         new_message = await bot.send_photo(
             chat_id=CHAT_ID,
             photo=image_url,
@@ -352,13 +324,13 @@ async def send_athkar(athkar_type):
         )
 
         if new_message:
-            logger.info(f"✅ Successfully sent {athkar_type} athkar: {new_message.message_id}")
+            logger.info(f"Successfully sent {athkar_type} athkar: {new_message.message_id}")
         else:
-            logger.error(f"❌ Failed to send {athkar_type} athkar message")
+            logger.error(f"Failed to send {athkar_type} athkar message")
             
     except Exception as e:
-        logger.error(f"❌ Error in send_athkar: {e}")
-        # Retry once after a short delay
+        logger.error(f"Error in send_athkar: {e}")
+        # Retry once
         try:
             await asyncio.sleep(5)
             new_message = await bot.send_photo(
@@ -366,19 +338,17 @@ async def send_athkar(athkar_type):
                 photo=image_url,
                 caption=caption
             )
-            logger.info(f"✅ Successfully sent {athkar_type} athkar on retry: {new_message.message_id}")
+            logger.info(f"Successfully sent {athkar_type} athkar on retry")
         except Exception as retry_error:
-            logger.error(f"❌ Retry also failed for {athkar_type} athkar: {retry_error}")
+            logger.error(f"Retry also failed for {athkar_type} athkar: {retry_error}")
 
 async def send_quran_pages(target_date=None):
     """Send Quran pages for a specific date"""
-    logger.info("📖 Entering send_quran_pages function")
+    logger.info("Sending Quran pages")
     
-    # Use the target date if provided, otherwise use today's date
     if target_date is None:
         target_date = datetime.now(CAIRO_TZ).date()
     else:
-        # If target_date is a datetime object, extract the date
         if isinstance(target_date, datetime):
             target_date = target_date.date()
     
@@ -386,8 +356,7 @@ async def send_quran_pages(target_date=None):
     page_1_url = f"{QURAN_PAGES_URL}/photo_{page1}.jpg"
     page_2_url = f"{QURAN_PAGES_URL}/photo_{page2}.jpg"
     
-    logger.info(f"📖 Sending Quran pages {page1}-{page2} for {target_date}")
-    logger.info(f"📖 Page URLs: {page_1_url}, {page_2_url}")
+    logger.info(f"Sending Quran pages {page1}-{page2} for {target_date}")
     
     # Validate URLs first
     async with aiohttp.ClientSession() as session:
@@ -395,15 +364,15 @@ async def send_quran_pages(target_date=None):
             try:
                 async with session.get(url, timeout=10) as response:
                     if response.status != 200:
-                        logger.error(f"❌ Quran page {i} not found: {url} (status {response.status})")
+                        logger.error(f"Quran page {i} not found: {url} (status {response.status})")
                         return
                     content = await response.content.read(10)
                     if not content.startswith(b'\xff\xd8'):
-                        logger.error(f"❌ Invalid image format for page {i}: {url}")
+                        logger.error(f"Invalid image format for page {i}: {url}")
                         return
-                    logger.info(f"✅ Page {i} validated: {url}")
+                    logger.info(f"Page {i} validated")
             except Exception as e:
-                logger.error(f"❌ Error validating Quran page {i} URL {url}: {e}")
+                logger.error(f"Error validating Quran page {i}: {e}")
                 return
     
     media = [
@@ -412,19 +381,96 @@ async def send_quran_pages(target_date=None):
     ]
     
     try:
-        logger.info("📖 Attempting to send Quran media group")
         message_ids = await send_media_group(CHAT_ID, media)
         
         if message_ids:
-            logger.info(f"✅ Successfully sent Quran pages {page1}-{page2}. Message IDs: {message_ids}")
+            logger.info(f"Successfully sent Quran pages {page1}-{page2}")
         else:
-            logger.error(f"❌ Failed to send Quran pages {page1}-{page2}: No message IDs returned")
+            logger.error(f"Failed to send Quran pages {page1}-{page2}")
     except Exception as e:
-        logger.error(f"❌ Error sending Quran pages {page1}-{page2}: {e}")
-    finally:
-        logger.info("📖 Exiting send_quran_pages function")
+        logger.error(f"Error sending Quran pages {page1}-{page2}: {e}")
 
 DAILY_TASKS = []  # Global list to store all scheduled tasks for the day
+
+async def schedule_fallback_tasks(now, today, tomorrow):
+    """Schedule tasks using fallback prayer times when API is unavailable."""
+    global DAILY_TASKS
+    DAILY_TASKS.clear()
+
+    def parse_time(day, hhmm):
+        hour, minute = map(int, hhmm.split(':'))
+        dt = datetime.combine(day, datetime.min.time().replace(hour=hour, minute=minute))
+        return CAIRO_TZ.localize(dt)
+
+    fajr_today = parse_time(today, FALLBACK_PRAYER_TIMES['Fajr'])
+    asr_today = parse_time(today, FALLBACK_PRAYER_TIMES['Asr'])
+    morning_today = fajr_today + timedelta(minutes=35)
+    evening_today = asr_today + timedelta(minutes=30)
+    quran_today = evening_today + timedelta(minutes=10)
+
+    # If a slot already passed, queue the same slot for tomorrow.
+    fajr_tomorrow = parse_time(tomorrow, FALLBACK_PRAYER_TIMES['Fajr'])
+    asr_tomorrow = parse_time(tomorrow, FALLBACK_PRAYER_TIMES['Asr'])
+    morning_tomorrow = fajr_tomorrow + timedelta(minutes=35)
+    evening_tomorrow = asr_tomorrow + timedelta(minutes=30)
+    quran_tomorrow = evening_tomorrow + timedelta(minutes=10)
+
+    DAILY_TASKS.append({
+        'type': 'morning_athkar',
+        'time': morning_today if morning_today > now else morning_tomorrow,
+        'description': '🌅 Morning Athkar (fallback)'
+    })
+
+    evening_task_time = evening_today if evening_today > now else evening_tomorrow
+    quran_task_time = quran_today if quran_today > now else quran_tomorrow
+    quran_task_date = today if quran_today > now else tomorrow
+    quran_pages = get_next_quran_pages_for_date(quran_task_date)
+
+    DAILY_TASKS.extend([
+        {
+            'type': 'evening_athkar',
+            'time': evening_task_time,
+            'description': '🌙 Evening Athkar (fallback)'
+        },
+        {
+            'type': 'quran',
+            'time': quran_task_time,
+            'description': f'📖 Quran Pages {quran_pages[0]}-{quran_pages[1]} (fallback)'
+        }
+    ])
+
+    for task in DAILY_TASKS:
+        if task['type'] == 'morning_athkar':
+            scheduler.add_job(
+                send_athkar,
+                trigger=DateTrigger(run_date=task['time'], timezone=CAIRO_TZ),
+                args=["morning"],
+                id=f"morning_athkar_{task['time'].strftime('%Y%m%d')}",
+                replace_existing=True,
+                misfire_grace_time=300
+            )
+        elif task['type'] == 'evening_athkar':
+            scheduler.add_job(
+                send_athkar,
+                trigger=DateTrigger(run_date=task['time'], timezone=CAIRO_TZ),
+                args=["night"],
+                id=f"night_athkar_{task['time'].strftime('%Y%m%d')}",
+                replace_existing=True,
+                misfire_grace_time=300
+            )
+        elif task['type'] == 'quran':
+            scheduler.add_job(
+                send_quran_pages,
+                trigger=DateTrigger(run_date=task['time'], timezone=CAIRO_TZ),
+                args=[task['time'].date()],
+                id=f"quran_pages_{task['time'].strftime('%Y%m%d')}",
+                replace_existing=True,
+                misfire_grace_time=300
+            )
+
+    logger.warning("Fallback schedule applied due to prayer API failure")
+    for task in sorted(DAILY_TASKS, key=lambda x: x['time']):
+        logger.info(f"Fallback task: {task['description']} at {task['time']}")
 
 async def schedule_tasks():
     try:
@@ -609,12 +655,11 @@ async def schedule_tasks():
                     misfire_grace_time=300
                 )
             elif task['type'] == 'quran':
-                # Pass the exact date to ensure correct pages are sent
                 task_date = task['time'].date()
                 scheduler.add_job(
                     send_quran_pages,
                     trigger=DateTrigger(run_date=task['time'], timezone=CAIRO_TZ),
-                    args=[task_date],  # Pass the specific date
+                    args=[task_date],
                     id=f"quran_pages_{task['time'].strftime('%Y%m%d')}",
                     replace_existing=True,
                     misfire_grace_time=300
@@ -646,8 +691,8 @@ async def heartbeat():
         now = datetime.now(CAIRO_TZ)
         scheduled_count = len(DAILY_TASKS) if DAILY_TASKS else 0
         scheduler_jobs = len(scheduler.get_jobs()) if scheduler.running else 0
-        logger.info(f"💓 Bot running | {now.strftime('%H:%M')} | {scheduled_count} tasks scheduled | {scheduler_jobs} scheduler jobs | Scheduler running: {scheduler.running}")
-        await asyncio.sleep(300)  # Every 5 minutes instead of every minute
+        logger.info(f"Heartbeat: {now.strftime('%H:%M')} | {scheduled_count} tasks | {scheduler_jobs} scheduler jobs | Running: {scheduler.running}")
+        await asyncio.sleep(300)
 
 from aiohttp import web
 

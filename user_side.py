@@ -135,7 +135,7 @@ async def init_db():
     logger.info("Creating database tables...")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    logger.info("✅ Database tables ready")
+    logger.info("Database tables ready")
 
 async def get_user_prefs(telegram_id: str) -> UserPreferences | None:
     """Get user preferences from database"""
@@ -167,7 +167,7 @@ async def save_user_prefs(telegram_id: str, first_name: str, selected_athkar: li
             session.add(user_prefs)
 
         await session.commit()
-        logger.info(f"✅ Saved preferences for user {telegram_id}: {len(selected_athkar)} athkar selected, frequency: {frequency}")
+        logger.info(f"Saved preferences for user {telegram_id}: {len(selected_athkar)} athkar, {frequency}")
 
 # ============================================================================
 # TELEGRAM HANDLERS
@@ -178,13 +178,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     telegram_id = str(user.id)
 
-    logger.info("")
-    logger.info("=" * 60)
-    logger.info(f"👤 /START COMMAND RECEIVED")
-    logger.info(f"   User ID: {telegram_id}")
-    logger.info(f"   Name: {user.first_name}")
-    logger.info("=" * 60)
-    logger.info("")
+    logger.info(f"/start command from user {telegram_id} ({user.first_name})")
 
     # Check if user already has preferences
     user_prefs = await get_user_prefs(telegram_id)
@@ -329,7 +323,7 @@ async def set_frequency(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = InlineKeyboardMarkup(buttons)
 
     await query.edit_message_text(text=confirmation_text, reply_markup=keyboard)
-    logger.info(f"✅ User {user_id} saved preferences")
+    logger.info(f"User {user_id} saved preferences: {len(selected_athkar)} athkar, {frequency}")
 
 async def edit_athkar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Edit Athkar selections for existing user"""
@@ -432,7 +426,7 @@ application.add_handler(CallbackQueryHandler(start, pattern="^start$"))
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Log the error and send a message to the user"""
-    logger.error(f"💥 Exception while handling an update: {context.error}", exc_info=context.error)
+    logger.error(f"Exception while handling an update: {context.error}", exc_info=context.error)
 
 application.add_error_handler(error_handler)
 
@@ -441,15 +435,4 @@ web_app = web.Application()
 web_app.router.add_get("/", handle_root)
 web_app.router.add_post("/webhook", handle_webhook)
 
-# Function to start the bot
-async def start_user_bot():
-    """Start the user bot with proper event handling"""
-    logger.info("🤖 Initializing user bot event handlers...")
-
-    # The application is already set up with handlers above
-    logger.info("✅ User side bot ready - waiting for /start commands")
-
-    # Return the application for the main bot to use
-    return application
-
-logger.info("✅ User side bot initialized")
+logger.info("User side bot initialized")
