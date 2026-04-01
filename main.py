@@ -75,8 +75,8 @@ async def run_user_bot():
     """Run the user bot with polling to receive /start commands"""
     logger.info("🤖 User bot polling starting...")
     try:
-        # Start the updater (polling)
-        await application.updater.start()
+        # Start polling - this will handle updates concurrently
+        await application.updater.start_polling()
         logger.info("✅ User bot polling active")
 
         # Keep polling running
@@ -86,7 +86,7 @@ async def run_user_bot():
         logger.info("🛑 User bot polling stopped")
         await application.updater.stop()
     except Exception as e:
-        logger.error(f"💥 Error in user bot polling: {e}")
+        logger.error(f"💥 Error in user bot polling: {e}", exc_info=True)
         raise
 
 async def main():
