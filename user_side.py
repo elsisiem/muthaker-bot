@@ -429,4 +429,15 @@ web_app = web.Application()
 web_app.router.add_get("/", handle_root)
 web_app.router.add_post("/webhook", handle_webhook)
 
+# Function to start the bot
+async def start_user_bot():
+    """Start the user bot with proper event handling"""
+    logger.info("🤖 Initializing user bot event handlers...")
+
+    # The application is already set up with handlers above
+    logger.info("✅ User side bot ready - waiting for /start commands")
+
+    # Return the application for the main bot to use
+    return application
+
 logger.info("✅ User side bot initialized")
