@@ -75,9 +75,13 @@ async def run_user_bot():
     """Run the user bot with polling to receive /start commands"""
     logger.info("🤖 User bot polling starting...")
     try:
+        # Initialize and start the application
+        await application.initialize()
+        await application.start()
+
         # Start polling - this will handle updates concurrently
-        await application.updater.start_polling()
-        logger.info("✅ User bot polling active")
+        await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+        logger.info("✅ User bot polling active and receiving updates")
 
         # Keep polling running
         while True:
@@ -85,6 +89,7 @@ async def run_user_bot():
     except asyncio.CancelledError:
         logger.info("🛑 User bot polling stopped")
         await application.updater.stop()
+        await application.stop()
     except Exception as e:
         logger.error(f"💥 Error in user bot polling: {e}", exc_info=True)
         raise
@@ -98,10 +103,9 @@ async def main():
         logger.info("🎬 " + "=" * 56)
         logger.info("")
 
-        # Initialize database and user side bot
+        # Initialize database
         logger.info("📦 Initializing user preferences database...")
         await init_db()
-        await application.initialize()
         logger.info("✅ User preferences database initialized")
         logger.info("")
 
