@@ -80,7 +80,7 @@ ATHKAR_OPTIONS = [
         "id": "hizb",
         "ar": "ورد الحرز",
         "en": "Hizb Wird",
-        "text_ar": "لا إله إلا الله وحده لا شريك له، له الملك وله الحمد.",
+        "text_ar": "لا إله إلا الله وحده لا شريك له، له الملك وله الحمد وهو على كل شيء قدير.",
         "text_en": "There is no god but Allah alone with no partner. To Him belongs all dominion and praise.",
     },
     {
@@ -189,7 +189,7 @@ TEXTS = {
         "btn_change_lang": "تغيير اللغة",
     },
     "en": {
-        "welcome_new": "Welcome {name}.\n\nThis service helps you configure Athkar reminders.\nStart by choosing your language.",
+        "welcome_new": "Welcome {name}.\n\nThis service helps you configure Athkar reminders.\nUse the buttons below to choose language and settings.",
         "welcome_existing": "Welcome {name}.\n\nYour settings are saved. Choose an action.",
         "btn_lang": "Choose language",
         "btn_edit_athkar": "Edit Athkar",
@@ -197,7 +197,7 @@ TEXTS = {
         "btn_show": "View settings",
         "btn_start_setup": "Start setup",
         "choose_lang": "Choose your preferred language:",
-        "lang_saved": "Language saved.",
+        "lang_saved": "Language saved. Welcome to your Athkar reminder settings.",
         "choose_athkar": "Select the Athkar you want:\nYou can select multiple items.",
         "btn_select_all": "Select all",
         "btn_clear_all": "Clear all",
@@ -307,8 +307,7 @@ async def send_user_reminder(telegram_id: str):
         if not item:
             return
         text_key = "text_en" if lang == "en" else "text_ar"
-        title_key = "en" if lang == "en" else "ar"
-        body = f"{item[title_key]}\n{item[text_key]}"
+        body = item[text_key]
         await application.bot.send_message(chat_id=int(telegram_id), text=body)
 
     try:
@@ -534,7 +533,7 @@ def build_athkar_menu(lang: str, selected_ids: list[str]) -> InlineKeyboardMarku
     ])
 
     for athkar in ATHKAR_OPTIONS:
-        selected = "[x] " if athkar["id"] in selected_ids else "[ ] "
+        selected = "✓ " if athkar["id"] in selected_ids else "○ "
         buttons.append([InlineKeyboardButton(f"{selected}{athkar[key]}", callback_data=f"toggle_athkar_{athkar['id']}")])
 
     buttons.append([InlineKeyboardButton(tr(lang, "btn_continue"), callback_data="choose_frequency")])
