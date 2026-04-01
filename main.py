@@ -15,7 +15,7 @@ from fazkerbot import (
 )
 
 # User side imports
-from user_side import web_app, application, init_db
+from user_side import web_app, application, init_db, start_user_bot
 
 # Setup detailed logging
 logging.basicConfig(
@@ -71,6 +71,24 @@ async def run_channel_bot():
     while True:
         await asyncio.sleep(60)
 
+async def run_user_bot():
+    """Run the user bot with polling to receive /start commands"""
+    logger.info("🤖 User bot polling starting...")
+    try:
+        # Start the updater (polling)
+        await application.updater.start()
+        logger.info("✅ User bot polling active")
+
+        # Keep polling running
+        while True:
+            await asyncio.sleep(60)
+    except asyncio.CancelledError:
+        logger.info("🛑 User bot polling stopped")
+        await application.updater.stop()
+    except Exception as e:
+        logger.error(f"💥 Error in user bot polling: {e}")
+        raise
+
 async def main():
     """Main function to run all bot components concurrently."""
     try:
@@ -93,8 +111,14 @@ async def main():
         logger.info("✅ Channel bot task created")
         logger.info("")
 
-        # Start the web server for webhook handling (for Telegram updates)
-        logger.info("🌐 Starting web server for Telegram webhook...")
+        # Start the user bot with polling
+        logger.info("💬 Starting user bot polling...")
+        user_bot_task = asyncio.create_task(run_user_bot())
+        logger.info("✅ User bot polling task created")
+        logger.info("")
+
+        # Start the web server for health checks
+        logger.info("🌐 Starting web server...")
         runner = web.AppRunner(web_app)
         await runner.setup()
         port = int(os.environ.get("PORT", 8080))
@@ -109,8 +133,8 @@ async def main():
         logger.info("")
         logger.info("📊 Running:")
         logger.info("   ✓ Channel Bot (Quran + Athkar → channel)")
-        logger.info("   ✓ User Bot (preferences & personalized DMs)")
-        logger.info("   ✓ Web Server (webhook @ port " + str(port) + ")")
+        logger.info("   ✓ User Bot Polling (listening for /start)")
+        logger.info("   ✓ Web Server (health check @ port " + str(port) + ")")
         logger.info("")
 
         # Keep the event loop running
