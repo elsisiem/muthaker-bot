@@ -6,7 +6,9 @@ Users choose Athkar content, frequency, language, and delivery mode.
 import os
 import logging
 import json
+import asyncio
 from datetime import datetime
+import pytz
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
@@ -22,12 +24,18 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, select, Text, text
 from sqlalchemy.orm import declarative_base
 from aiohttp import web
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 logging.getLogger('telegram').setLevel(logging.WARNING)
 logging.getLogger('httpx').setLevel(logging.WARNING)
+logging.getLogger('apscheduler').setLevel(logging.WARNING)
+
+CAIRO_TZ = pytz.timezone("Africa/Cairo")
 
 # ============================================================================
 # DATABASE SETUP
@@ -218,6 +226,11 @@ TEXTS = {
     },
 }
 
+# User reminder scheduler state
+reminder_scheduler = AsyncIOScheduler(timezone=CAIRO_TZ)
+reminder_lock = asyncio.Lock()
+rotation_state: dict[str, int] = {}
+
 
 # ============================================================================
 # HELPERS
@@ -267,6 +280,140 @@ def format_frequency_label(frequency: str, custom_minutes: int | None, lang: str
     if "times" in option:
         return f"{label} ({', '.join(option['times'])})"
     return label
+
+
+def get_athkar_option(athkar_id: str):
+    for item in ATHKAR_OPTIONS:
+        if item["id"] == athkar_id:
+            return item
+    return None
+
+
+async def send_user_reminder(telegram_id: str):
+    """Dispatch one reminder cycle for a user according to mode and language."""
+    user_prefs = await get_user_prefs(telegram_id)
+    if not user_prefs or not user_prefs.is_active or not user_prefs.selected_athkar:
+        return
+
+    selected_ids = json.loads(user_prefs.selected_athkar)
+    if not selected_ids:
+        return
+
+    lang = "en" if user_prefs.language == "en" else "ar"
+    mode = user_prefs.delivery_mode or "rotating"
+
+    async def send_one(athkar_id: str):
+        item = get_athkar_option(athkar_id)
+        if not item:
+            return
+        text_key = "text_en" if lang == "en" else "text_ar"
+        title_key = "en" if lang == "en" else "ar"
+        body = f"{item[title_key]}\n{item[text_key]}"
+        await application.bot.send_message(chat_id=int(telegram_id), text=body)
+
+    try:
+        if mode == "batch":
+            for athkar_id in selected_ids:
+                await send_one(athkar_id)
+        else:
+            current_index = rotation_state.get(telegram_id, 0) % len(selected_ids)
+            await send_one(selected_ids[current_index])
+            rotation_state[telegram_id] = (current_index + 1) % len(selected_ids)
+    except Exception as e:
+        logger.error("Failed sending reminder to user %s: %s", telegram_id, e)
+
+
+def clear_user_reminder_jobs():
+    for job in reminder_scheduler.get_jobs():
+        if job.id.startswith("user_reminder_"):
+            reminder_scheduler.remove_job(job.id)
+
+
+def add_user_jobs(user_prefs: UserPreferences):
+    telegram_id = str(user_prefs.telegram_id)
+    frequency = user_prefs.frequency or "2x_daily"
+
+    # Interval-based schedules
+    interval_minutes = None
+    if frequency == "custom_interval" and user_prefs.custom_frequency_minutes:
+        interval_minutes = user_prefs.custom_frequency_minutes
+    elif frequency in FREQUENCY_OPTIONS and "minutes" in FREQUENCY_OPTIONS[frequency]:
+        interval_minutes = FREQUENCY_OPTIONS[frequency]["minutes"]
+
+    if interval_minutes:
+        reminder_scheduler.add_job(
+            send_user_reminder,
+            trigger=IntervalTrigger(minutes=interval_minutes, timezone=CAIRO_TZ),
+            args=[telegram_id],
+            id=f"user_reminder_interval_{telegram_id}",
+            replace_existing=True,
+            misfire_grace_time=60,
+        )
+        return
+
+    # Daily fixed-time schedules
+    time_list = FREQUENCY_OPTIONS.get(frequency, {}).get("times", ["09:00", "18:00"])
+    for idx, hhmm in enumerate(time_list):
+        try:
+            hour, minute = map(int, hhmm.split(":"))
+            reminder_scheduler.add_job(
+                send_user_reminder,
+                trigger=CronTrigger(hour=hour, minute=minute, timezone=CAIRO_TZ),
+                args=[telegram_id],
+                id=f"user_reminder_daily_{telegram_id}_{idx}",
+                replace_existing=True,
+                misfire_grace_time=300,
+            )
+        except Exception as e:
+            logger.error("Invalid daily time '%s' for user %s: %s", hhmm, telegram_id, e)
+
+
+async def rebuild_user_reminder_schedule():
+    """Rebuild all per-user reminder jobs from database state."""
+    async with reminder_lock:
+        clear_user_reminder_jobs()
+
+        async with async_session() as session:
+            result = await session.execute(
+                select(UserPreferences).where(
+                    UserPreferences.is_active == True,
+                    UserPreferences.selected_athkar.is_not(None),
+                )
+            )
+            users = result.scalars().all()
+
+        for user_prefs in users:
+            try:
+                selected = json.loads(user_prefs.selected_athkar or "[]")
+                if not selected:
+                    continue
+                add_user_jobs(user_prefs)
+            except Exception as e:
+                logger.error("Failed scheduling reminders for user %s: %s", user_prefs.telegram_id, e)
+
+        total = len([j for j in reminder_scheduler.get_jobs() if j.id.startswith("user_reminder_")])
+        logger.info("User reminder scheduler refreshed: %s jobs", total)
+
+
+async def start_user_reminder_scheduler():
+    """Start scheduler and load reminder jobs."""
+    if not reminder_scheduler.running:
+        reminder_scheduler.start()
+
+    reminder_scheduler.add_job(
+        rebuild_user_reminder_schedule,
+        trigger=CronTrigger(minute="*/15", timezone=CAIRO_TZ),
+        id="user_reminder_refresh",
+        replace_existing=True,
+        misfire_grace_time=120,
+    )
+
+    await rebuild_user_reminder_schedule()
+
+
+async def stop_user_reminder_scheduler():
+    if reminder_scheduler.running:
+        reminder_scheduler.shutdown(wait=False)
 
 
 # ============================================================================
@@ -341,6 +488,9 @@ async def save_user_prefs(
             delivery_mode,
             custom_frequency_minutes,
         )
+
+    if reminder_scheduler.running:
+        await rebuild_user_reminder_schedule()
 
 
 # ============================================================================
@@ -474,6 +624,9 @@ async def set_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 prefs.language = chosen
                 prefs.updated_at = datetime.utcnow()
                 await session.commit()
+
+        if reminder_scheduler.running:
+            await rebuild_user_reminder_schedule()
 
     await query.edit_message_text(
         text=tr(chosen, "lang_saved"),

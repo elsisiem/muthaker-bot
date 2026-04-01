@@ -17,7 +17,7 @@ from fazkerbot import (
 )
 
 # User side imports
-from user_side import web_app, application, init_db
+from user_side import web_app, application, init_db, start_user_reminder_scheduler, stop_user_reminder_scheduler
 
 # Setup logging
 logging.basicConfig(
@@ -80,10 +80,14 @@ async def run_user_bot():
         await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
         logger.info("User bot polling active")
 
+        await start_user_reminder_scheduler()
+        logger.info("User reminder scheduler active")
+
         while True:
             await asyncio.sleep(60)
     except asyncio.CancelledError:
         logger.info("User bot polling stopped")
+        await stop_user_reminder_scheduler()
         if application.updater and application.updater.running:
             await application.updater.stop()
         await application.stop()
