@@ -1,7 +1,7 @@
 """
-Interactive user preferences bot for Muthaker.
-Users select Athkar reminders, frequency, and timezone.
-Sends personalized reminders via DM based on their preferences.
+Interactive user preferences bot for personalized Athkar reminders.
+Users select which Athkar they want and how often to receive them.
+Sends personalized DM reminders based on their preferences.
 """
 
 import os
@@ -16,14 +16,11 @@ from telegram.ext import (
     Application,
     CommandHandler,
     CallbackQueryHandler,
-    MessageHandler,
-    ConversationHandler,
     ContextTypes,
-    filters,
 )
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, select
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, select, Text
 from sqlalchemy.orm import declarative_base
 from aiohttp import web
 
@@ -49,16 +46,15 @@ Base = declarative_base()
 async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 class UserPreferences(Base):
-    """User preferences model"""
+    """User preferences model for Athkar reminders"""
     __tablename__ = "user_preferences"
 
     id = Column(Integer, primary_key=True)
     telegram_id = Column(String, unique=True, index=True)
     first_name = Column(String, nullable=True)
-    selected_athkar = Column(String, nullable=True)  # JSON: ["Hizb", "Tasbih", ...]
-    frequency = Column(String, default="2x_daily")  # "1x_daily", "2x_daily", "3x_daily", "custom:{n}"
+    selected_athkar = Column(Text, nullable=True)  # JSON: ["hizb", "baaqiyat", ...]
+    frequency = Column(String, default="2x_daily")  # "1x_daily", "2x_daily", "3x_daily", or "custom:HH:MM,HH:MM"
     timezone = Column(String, default="Africa/Cairo")
-    language = Column(String, default="ar")  # "ar" or "en"
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -70,438 +66,367 @@ class UserPreferences(Base):
 ATHKAR_OPTIONS = [
     {
         "id": "hizb",
-        "ar": "منبة الحرز",
+        "ar": "🛡️ منبة الحرز",
         "en": "Al-Hizb",
         "text_ar": "لا اله إلا اللّٰه وحده لا شريك له ، له الملك وله الحمد",
-        "emoji": "🛡️"
     },
     {
         "id": "baaqiyat",
-        "ar": "الباقيات الصالحات",
+        "ar": "✨ الباقيات الصالحات",
         "en": "Eternal Good Works",
         "text_ar": "سبحان اللّٰه الحمد لله لا إله إلا اللّٰه اللّٰه أكبر",
-        "emoji": "✨"
     },
     {
         "id": "hawqala",
-        "ar": "الحوقلة",
+        "ar": "🤲 الحوقلة",
         "en": "Hawqalah",
         "text_ar": "لا حول ولا قوة إلا بالله العلي العظيم",
-        "emoji": "🤲"
     },
     {
         "id": "tasbih",
-        "ar": "التسبيح",
+        "ar": "📿 التسبيح",
         "en": "Tasbih",
         "text_ar": "سبحان اللّٰه وبحمده سبحان اللّٰه العظيم",
-        "emoji": "📿"
     },
     {
         "id": "dhun_noon",
-        "ar": "دعاء ذي النون",
-        "en": "Dua Dhun-Noon",
+        "ar": "🌙 دعاء ذي النون",
+        "en": "Dua of Dhun-Nun",
         "text_ar": "لا إله إلا انت سبحانك إني كنت من الظالمين",
-        "emoji": "🙏"
     },
     {
-        "id": "tahleel",
-        "ar": "التهليل",
-        "en": "Tahleel",
-        "text_ar": "لا إله إلا اللّٰه",
-        "emoji": "💫"
+        "id": "tahlil",
+        "ar": "📣 التهليل",
+        "en": "Tahlil",
+        "text_ar": "قال النبي : أفضل الذكر لا إله إلا اللّٰه",
     },
     {
-        "id": "hamd",
-        "ar": "الحمد",
-        "en": "Praise",
-        "text_ar": "الحمد لله رب العالمين",
-        "emoji": "🌟"
+        "id": "tahmid",
+        "ar": "🙏 الحمد",
+        "en": "Tahmid",
+        "text_ar": "أفضل الدعاء الحمد لله",
     },
     {
         "id": "istighfar",
-        "ar": "الاستغفار",
+        "ar": "🔄 الاستغفار",
         "en": "Istighfar",
         "text_ar": "استغفر اللّٰه العظيم وأتوب إليه",
-        "emoji": "💚"
     },
     {
-        "id": "salah",
-        "ar": "الصلاة على النبي",
-        "en": "Salah upon Prophet",
-        "text_ar": "اللهم صل وسلم وبارك على محمد وعلى آل محمد",
-        "emoji": "💎"
+        "id": "salat",
+        "ar": "💌 الصلاة على النبي",
+        "en": "Salat on the Prophet",
+        "text_ar": "اللهم صل وسلم وبارك على محمد",
     },
 ]
 
-FREQUENCY_OPTIONS = [
-    {"id": "1x_daily", "ar": "مرة واحدة يومياً", "en": "Once daily (morning)", "times": ["06:00"]},
-    {"id": "2x_daily", "ar": "مرتان يومياً", "en": "Twice daily (morning + evening)", "times": ["06:00", "19:00"]},
-    {"id": "3x_daily", "ar": "ثلاث مرات يومياً", "en": "Three times daily", "times": ["06:00", "13:00", "19:00"]},
-    {"id": "custom", "ar": "مخصص (أدخل عدد المرات)", "en": "Custom (enter number of times)", "custom": True},
-]
-
-# Conversation states
-(
-    SELECT_ATHKAR,
-    CONFIRM_ATHKAR,
-    SELECT_FREQUENCY,
-    SELECT_CUSTOM_FREQUENCY,
-    TIMEZONE_SELECT,
-    LANG_SELECT,
-) = range(6)
+FREQUENCY_OPTIONS = {
+    "1x_daily": {"ar": "مرة واحدة يومياً", "en": "Once daily", "times": ["09:00"]},
+    "2x_daily": {"ar": "مرتين يومياً", "en": "Twice daily", "times": ["09:00", "18:00"]},
+    "3x_daily": {"ar": "ثلاث مرات يومياً", "en": "Three times daily", "times": ["09:00", "13:00", "18:00"]},
+}
 
 # ============================================================================
-# DATABASE OPERATIONS
+# DATABASE INITIALIZATION
 # ============================================================================
 
-async def get_user(telegram_id: str) -> UserPreferences:
-    """Get user from database"""
+async def init_db():
+    """Initialize database tables"""
+    logger.info("Creating database tables...")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    logger.info("✅ Database tables ready")
+
+async def get_user_prefs(telegram_id: str) -> UserPreferences | None:
+    """Get user preferences from database"""
     async with async_session() as session:
         result = await session.execute(
-            select(UserPreferences).where(UserPreferences.telegram_id == telegram_id)
+            select(UserPreferences).where(UserPreferences.telegram_id == str(telegram_id))
         )
         return result.scalars().first()
 
-async def create_or_update_user(telegram_id: str, first_name: str = None, **kwargs):
-    """Create or update user in database"""
+async def save_user_prefs(telegram_id: str, first_name: str, selected_athkar: list, frequency: str):
+    """Save or update user preferences"""
     async with async_session() as session:
         user = await session.execute(
-            select(UserPreferences).where(UserPreferences.telegram_id == telegram_id)
+            select(UserPreferences).where(UserPreferences.telegram_id == str(telegram_id))
         )
-        user = user.scalars().first()
+        user_prefs = user.scalars().first()
 
-        if not user:
-            user = UserPreferences(telegram_id=telegram_id, first_name=first_name)
-            session.add(user)
-
-        for key, value in kwargs.items():
-            if hasattr(user, key):
-                setattr(user, key, value)
+        if user_prefs:
+            user_prefs.selected_athkar = json.dumps(selected_athkar)
+            user_prefs.frequency = frequency
+            user_prefs.updated_at = datetime.utcnow()
+        else:
+            user_prefs = UserPreferences(
+                telegram_id=str(telegram_id),
+                first_name=first_name,
+                selected_athkar=json.dumps(selected_athkar),
+                frequency=frequency,
+            )
+            session.add(user_prefs)
 
         await session.commit()
-        return user
-
-async def init_db():
-    """Initialize database"""
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+        logger.info(f"✅ Saved preferences for user {telegram_id}: {len(selected_athkar)} athkar selected, frequency: {frequency}")
 
 # ============================================================================
-# BOT HANDLERS
+# TELEGRAM HANDLERS
 # ============================================================================
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Start command - show welcome message"""
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start command - show welcome message and Athkar selection"""
     user = update.effective_user
     telegram_id = str(user.id)
 
-    # Create user in DB if not exists
-    await create_or_update_user(telegram_id, user.first_name)
+    logger.info(f"👤 User {telegram_id} ({user.first_name}) started the bot")
 
-    logger.info(f"Start command from user {telegram_id}")
+    # Check if user already has preferences
+    user_prefs = await get_user_prefs(telegram_id)
 
-    # Welcome message
-    welcome_text = """
-🌙 أهلا وسهلا بك في منصة مذكر! 🌙
-Ahlan wa sahlan in Muthaker Platform!
+    if user_prefs:
+        welcome_text = f"👋 أهلاً وسهلاً {user.first_name}!\n\nأنت مسجل بالفعل. اختر أحد الخيارات:"
+        buttons = [
+            [InlineKeyboardButton("🔄 تعديل اختيارات الأذكار", callback_data="edit_athkar")],
+            [InlineKeyboardButton("⏰ تغيير التكرار", callback_data="edit_frequency")],
+            [InlineKeyboardButton("📋 عرض اختيارتي", callback_data="show_prefs")],
+        ]
+    else:
+        welcome_text = f"""
+👋 أهلاً وسهلاً {user.first_name}!
 
-اختر اللغة من فضلك:
-Please select your language:
-    """
+أنا بوت ذاكر الأذكار. سأساعدك على اختيار الأذكار التي تفضلها والمرات التي تريد تلقي التذكيرات فيها.
 
-    keyboard = [
-        [InlineKeyboardButton("🇸🇦 العربية", callback_data="lang_ar")],
-        [InlineKeyboardButton("🇬🇧 English", callback_data="lang_en")],
-    ]
+انقر أدناه للبدء:
+"""
+        buttons = [
+            [InlineKeyboardButton("🎯 اختيار الأذكار", callback_data="select_athkar")],
+        ]
 
-    await update.message.reply_text(welcome_text, reply_markup=InlineKeyboardMarkup(keyboard))
-    return LANG_SELECT
+    keyboard = InlineKeyboardMarkup(buttons)
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=welcome_text, reply_markup=keyboard)
 
-async def language_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle language selection"""
+async def select_athkar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show Athkar selection menu"""
     query = update.callback_query
     await query.answer()
 
-    telegram_id = str(update.effective_user.id)
-    lang = "ar" if query.data == "lang_ar" else "en"
-
-    # Save language
-    await create_or_update_user(telegram_id, language=lang)
-    context.user_data["language"] = lang
-
-    # Show main menu
-    if lang == "ar":
-        menu_text = "اختر ماذا تريد أن تفعل:\n\n🎯 اختر الأذكار التي تريد تذكيرات بها"
-        buttons = [
-            [InlineKeyboardButton("✨ اختر الأذكار", callback_data="select_athkar")],
-        ]
-    else:
-        menu_text = "Choose what you want to do:\n\n🎯 Select Athkar reminders"
-        buttons = [
-            [InlineKeyboardButton("✨ Select Athkar", callback_data="select_athkar")],
-        ]
-
-    await query.edit_message_text(menu_text, reply_markup=InlineKeyboardMarkup(buttons))
-    return SELECT_ATHKAR
-
-async def start_athkar_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Start Athkar selection - show all options"""
-    query = update.callback_query
-    await query.answer()
-
-    lang = context.user_data.get("language", "ar")
-    telegram_id = str(update.effective_user.id)
-
-    # Get existing selection
-    user = await get_user(telegram_id)
-    existing = []
-    if user and user.selected_athkar:
-        existing = json.loads(user.selected_athkar)
-
-    # Build selection UI
-    if lang == "ar":
-        header = "🌟 اختر الأذكار التي تريد تذكيرات بها:\n\n"
-        header += "👇 اضغط على الأذكار لاختيارها (يمكنك اختيار أكثر من واحد)\n\n"
-        select_all_btn = "✅ اختر الكل"
-        confirm_btn = "💾 تأكيد"
-    else:
-        header = "🌟 Select the Athkar you want reminders for:\n\n"
-        header += "👇 Tap the Athkar to select them (you can select multiple)\n\n"
-        select_all_btn = "✅ Select All"
-        confirm_btn = "💾 Confirm"
+    text = "🎯 اختر الأذكار التي تريد تلقي التذكيرات عنها:\n\n(يمكنك اختيار أكثر من واحد)"
 
     buttons = []
-
-    # Add Athkar buttons
     for athkar in ATHKAR_OPTIONS:
-        is_selected = athkar["id"] in existing
-        emoji = "✅ " if is_selected else "👉 "
-        label = athkar["ar"] if lang == "ar" else athkar["en"]
-        buttons.append([InlineKeyboardButton(f"{emoji}{label}", callback_data=f"athkar_{athkar['id']}")])
+        buttons.append([InlineKeyboardButton(athkar["ar"], callback_data=f"toggle_athkar_{athkar['id']}")])
 
-    # Add select all button
-    buttons.append([InlineKeyboardButton(select_all_btn, callback_data="athkar_all")])
+    buttons.append([InlineKeyboardButton("✅ تم - اختيار التكرار", callback_data="choose_frequency")])
+    buttons.append([InlineKeyboardButton("« رجوع", callback_data="start")])
 
-    # Add confirm button
-    buttons.append([InlineKeyboardButton(confirm_btn, callback_data="confirm_athkar")])
+    keyboard = InlineKeyboardMarkup(buttons)
+    await query.edit_message_text(text=text, reply_markup=keyboard)
 
-    await query.edit_message_text(header, reply_markup=InlineKeyboardMarkup(buttons))
-
-    # Initialize selection in context
-    if "selected_athkar" not in context.user_data:
-        context.user_data["selected_athkar"] = existing
-
-    return SELECT_ATHKAR
-
-async def toggle_athkar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def toggle_athkar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Toggle Athkar selection"""
     query = update.callback_query
     await query.answer()
 
-    data = query.data
-    lang = context.user_data.get("language", "ar")
+    athkar_id = query.data.replace("toggle_athkar_", "")
+    user_id = str(query.from_user.id)
 
-    selected = context.user_data.get("selected_athkar", [])
-
-    if data == "athkar_all":
-        # Select all
-        selected = [athkar["id"] for athkar in ATHKAR_OPTIONS]
-    else:
-        # Toggle individual athkar
-        athkar_id = data.replace("athkar_", "")
-        if athkar_id in selected:
-            selected.remove(athkar_id)
+    # Get current selections from context or database
+    if "selected_athkar" not in context.user_data:
+        user_prefs = await get_user_prefs(user_id)
+        if user_prefs and user_prefs.selected_athkar:
+            context.user_data["selected_athkar"] = json.loads(user_prefs.selected_athkar)
         else:
-            selected.append(athkar_id)
+            context.user_data["selected_athkar"] = []
 
-    context.user_data["selected_athkar"] = selected
+    # Toggle the athkar
+    if athkar_id in context.user_data["selected_athkar"]:
+        context.user_data["selected_athkar"].remove(athkar_id)
+    else:
+        context.user_data["selected_athkar"].append(athkar_id)
 
-    # Rebuild UI with updated selections
-    header = "🌟 اختر الأذكار:\n\n" if lang == "ar" else "🌟 Select the Athkar:\n\n"
-    header += f"{'✨ تم اختيار: ' if lang == 'ar' else '✨ Selected: '}{len(selected)}\n\n"
+    # Rebuild the menu with selections marked
+    text = "🎯 اختر الأذكار التي تريد تلقي التذكيرات عنها:\n\n"
 
     buttons = []
-
     for athkar in ATHKAR_OPTIONS:
-        is_selected = athkar["id"] in selected
-        emoji = "✅ " if is_selected else "👉 "
-        label = athkar["ar"] if lang == "ar" else athkar["en"]
-        buttons.append([InlineKeyboardButton(f"{emoji}{label}", callback_data=f"athkar_{athkar['id']}")])
+        is_selected = athkar["id"] in context.user_data["selected_athkar"]
+        prefix = "✅ " if is_selected else "☐ "
+        buttons.append([InlineKeyboardButton(f"{prefix}{athkar['ar']}", callback_data=f"toggle_athkar_{athkar['id']}")])
 
-    select_all_btn = "✅ اختر الكل" if lang == "ar" else "✅ Select All"
-    confirm_btn = "💾 تأكيد" if lang == "ar" else "💾 Confirm"
+    buttons.append([InlineKeyboardButton("✅ تم - اختيار التكرار", callback_data="choose_frequency")])
+    buttons.append([InlineKeyboardButton("« رجوع", callback_data="start")])
 
-    buttons.append([InlineKeyboardButton(select_all_btn, callback_data="athkar_all")])
-    buttons.append([InlineKeyboardButton(confirm_btn, callback_data="confirm_athkar")])
+    keyboard = InlineKeyboardMarkup(buttons)
+    await query.edit_message_text(text=text, reply_markup=keyboard)
 
-    await query.edit_message_text(header, reply_markup=InlineKeyboardMarkup(buttons))
-
-    return SELECT_ATHKAR
-
-async def confirm_athkar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Confirm Athkar selection and move to frequency"""
+async def choose_frequency(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show frequency selection menu"""
     query = update.callback_query
+
+    if "selected_athkar" not in context.user_data or not context.user_data["selected_athkar"]:
+        await query.answer("❌ يرجى اختيار أذكار أولاً", show_alert=True)
+        return
+
     await query.answer()
 
-    lang = context.user_data.get("language", "ar")
-    selected = context.user_data.get("selected_athkar", [])
-
-    if not selected:
-        error_msg = "⚠️ الرجاء اختيار أذكار واحدة على الأقل" if lang == "ar" else "⚠️ Please select at least one Athkar"
-        await query.answer(error_msg, show_alert=True)
-        return SELECT_ATHKAR
-
-    # Show frequency selection
-    if lang == "ar":
-        header = "🔔 اختر تكرار التذكيرات:\n\n"
-    else:
-        header = "🔔 Select reminder frequency:\n\n"
+    text = "⏰ اختر كم مرة تريد تلقي التذكيرات:\n\n"
 
     buttons = []
-    for freq in FREQUENCY_OPTIONS:
-        label = freq["ar"] if lang == "ar" else freq["en"]
-        buttons.append([InlineKeyboardButton(label, callback_data=f"freq_{freq['id']}")])
+    for freq_id, freq_data in FREQUENCY_OPTIONS.items():
+        times = ", ".join(freq_data["times"])
+        button_text = f"{freq_data['ar']} ({times})"
+        buttons.append([InlineKeyboardButton(button_text, callback_data=f"set_freq_{freq_id}")])
 
-    await query.edit_message_text(header, reply_markup=InlineKeyboardMarkup(buttons))
-    return SELECT_FREQUENCY
+    buttons.append([InlineKeyboardButton("« رجوع", callback_data="select_athkar")])
 
-async def frequency_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle frequency selection"""
+    keyboard = InlineKeyboardMarkup(buttons)
+    await query.edit_message_text(text=text, reply_markup=keyboard)
+
+async def set_frequency(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Set the frequency and save preferences"""
     query = update.callback_query
     await query.answer()
 
-    lang = context.user_data.get("language", "ar")
-    freq_id = query.data.replace("freq_", "")
+    frequency = query.data.replace("set_freq_", "")
+    user = query.from_user
+    user_id = str(user.id)
 
-    # If custom frequency, ask for number
-    if freq_id == "custom":
-        msg = "كم مرة تريد أن تتلقى التذكيرات يومياً؟" if lang == "ar" else "How many times per day do you want reminders?"
-        await query.edit_message_text(msg)
-        return SELECT_CUSTOM_FREQUENCY
+    selected_athkar = context.user_data.get("selected_athkar", [])
 
-    context.user_data["frequency"] = freq_id
-
-    # Save preferences to database
-    telegram_id = str(update.effective_user.id)
-    selected_athkar = json.dumps(context.user_data.get("selected_athkar", []))
-
-    await create_or_update_user(
-        telegram_id,
-        selected_athkar=selected_athkar,
-        frequency=freq_id
-    )
-
-    # Show confirmation
-    if lang == "ar":
-        final_msg = "✅ تم حفظ تفضيلاتك بنجاح!\n\n🌙 ستتلقى تذكيرات الأذكار حسب اختيارك."
-    else:
-        final_msg = "✅ Your preferences have been saved!\n\n🌙 You'll receive Athkar reminders based on your selection."
-
-    await query.edit_message_text(final_msg)
-    return ConversationHandler.END
-
-async def custom_frequency_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle custom frequency input"""
-    try:
-        num = int(update.message.text.strip())
-        if num < 1 or num > 24:
-            raise ValueError
-    except ValueError:
-        lang = context.user_data.get("language", "ar")
-        msg = "الرجاء إدخال رقم صحيح بين 1 و 24" if lang == "ar" else "Please enter a valid number between 1 and 24"
-        await update.message.reply_text(msg)
-        return SELECT_CUSTOM_FREQUENCY
-
-    lang = context.user_data.get("language", "ar")
-    freq_id = f"custom_{num}"
-    context.user_data["frequency"] = freq_id
+    if not selected_athkar:
+        await query.answer("❌ يرجى اختيار أذكار أولاً", show_alert=True)
+        return
 
     # Save to database
-    telegram_id = str(update.effective_user.id)
-    selected_athkar = json.dumps(context.user_data.get("selected_athkar", []))
+    await save_user_prefs(user_id, user.first_name, selected_athkar, frequency)
 
-    await create_or_update_user(
-        telegram_id,
-        selected_athkar=selected_athkar,
-        frequency=freq_id
-    )
+    # Show confirmation
+    athkar_names = [a["ar"] for a in ATHKAR_OPTIONS if a["id"] in selected_athkar]
+    freq_data = FREQUENCY_OPTIONS[frequency]
 
-    if lang == "ar":
-        final_msg = f"✅ تم حفظ تفضيلاتك!\n\nستتلقى {num} تذكيرات يومية من الأذكار المختارة."
+    confirmation_text = f"""
+✅ تم حفظ اختياراتك!
+
+📋 الأذكار المختارة:
+{chr(10).join(['• ' + name for name in athkar_names])}
+
+⏰ التكرار: {freq_data['ar']}
+🕐 الأوقات: {', '.join(freq_data['times'])}
+
+سيتم إرسال التذكيرات إلى هنا مباشرة.
+"""
+
+    buttons = [
+        [InlineKeyboardButton("📋 عرض اختيارتي", callback_data="show_prefs")],
+        [InlineKeyboardButton("🔄 تعديل الاختيارات", callback_data="edit_athkar")],
+    ]
+    keyboard = InlineKeyboardMarkup(buttons)
+
+    await query.edit_message_text(text=confirmation_text, reply_markup=keyboard)
+    logger.info(f"✅ User {user_id} saved preferences")
+
+async def edit_athkar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Edit Athkar selections for existing user"""
+    query = update.callback_query
+    await query.answer()
+
+    # Load current preferences
+    user_id = str(query.from_user.id)
+    user_prefs = await get_user_prefs(user_id)
+
+    if user_prefs and user_prefs.selected_athkar:
+        context.user_data["selected_athkar"] = json.loads(user_prefs.selected_athkar)
     else:
-        final_msg = f"✅ Your preferences have been saved!\n\nYou'll receive {num} daily reminders."
+        context.user_data["selected_athkar"] = []
 
-    await update.message.reply_text(final_msg)
-    return ConversationHandler.END
+    await select_athkar(update, context)
 
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Cancel conversation"""
-    await update.message.reply_text("تم إلغاء العملية" if context.user_data.get("language") == "ar" else "Cancelled")
-    return ConversationHandler.END
+async def show_prefs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show user's current preferences"""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = str(query.from_user.id)
+    user_prefs = await get_user_prefs(user_id)
+
+    if not user_prefs or not user_prefs.selected_athkar:
+        text = "لم تقم بتحديد أي أذكار حتى الآن."
+        buttons = [[InlineKeyboardButton("🎯 اختيار الأذكار", callback_data="select_athkar")]]
+    else:
+        selected_ids = json.loads(user_prefs.selected_athkar)
+        athkar_names = [a["ar"] for a in ATHKAR_OPTIONS if a["id"] in selected_ids]
+        freq_data = FREQUENCY_OPTIONS.get(user_prefs.frequency, FREQUENCY_OPTIONS["2x_daily"])
+
+        text = f"""
+📋 اختياراتك الحالية:
+
+الأذكار:
+{chr(10).join(['• ' + name for name in athkar_names])}
+
+التكرار: {freq_data['ar']}
+الأوقات: {', '.join(freq_data['times'])}
+"""
+
+        buttons = [
+            [InlineKeyboardButton("🔄 تعديل الأذكار", callback_data="edit_athkar")],
+            [InlineKeyboardButton("⏰ تغيير التكرار", callback_data="edit_frequency")],
+        ]
+
+    keyboard = InlineKeyboardMarkup(buttons)
+    await query.edit_message_text(text=text, reply_markup=keyboard)
+
+async def edit_frequency(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Edit frequency for existing user"""
+    query = update.callback_query
+
+    user_id = str(query.from_user.id)
+    user_prefs = await get_user_prefs(user_id)
+
+    if not user_prefs or not user_prefs.selected_athkar:
+        await query.answer("❌ يرجى اختيار أذكار أولاً", show_alert=True)
+        return
+
+    context.user_data["selected_athkar"] = json.loads(user_prefs.selected_athkar)
+    await choose_frequency(update, context)
 
 # ============================================================================
-# WEBHOOK HANDLER
+# WEB SERVER SETUP
 # ============================================================================
 
-async def webhook_handler(request):
-    """Handle Telegram webhook updates"""
-    try:
-        update_data = await request.json()
-        update = Update.de_json(update_data, application.bot)
-        await application.process_update(update)
-    except Exception as e:
-        logger.error(f"Error processing webhook: {e}")
-    return web.Response(text="OK")
+async def handle_webhook(request):
+    """Handle Telegram webhook requests"""
+    data = await request.json()
+    await application.process_update(data)
+    return web.Response()
+
+async def handle_root(request):
+    """Health check endpoint"""
+    return web.Response(text="User side bot is running ✅")
 
 # ============================================================================
-# APPLICATION SETUP
+# BOT INITIALIZATION
 # ============================================================================
 
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 if not TOKEN:
-    raise RuntimeError("TELEGRAM_BOT_TOKEN not set")
+    raise RuntimeError("TELEGRAM_BOT_TOKEN environment variable is not set")
 
 application = Application.builder().token(TOKEN).build()
 
-# Conversation handler
-conv_handler = ConversationHandler(
-    entry_points=[CommandHandler("start", start)],
-    states={
-        LANG_SELECT: [CallbackQueryHandler(language_selected, pattern="^lang_")],
-        SELECT_ATHKAR: [
-            CallbackQueryHandler(start_athkar_selection, pattern="^select_athkar$"),
-            CallbackQueryHandler(toggle_athkar, pattern="^athkar_"),
-            CallbackQueryHandler(confirm_athkar, pattern="^confirm_athkar$"),
-        ],
-        SELECT_FREQUENCY: [
-            CallbackQueryHandler(frequency_selected, pattern="^freq_"),
-        ],
-        SELECT_CUSTOM_FREQUENCY: [
-            MessageHandler(filters.TEXT & ~filters.COMMAND, custom_frequency_received),
-        ],
-    },
-    fallbacks=[CommandHandler("cancel", cancel)],
-)
-
-application.add_handler(conv_handler)
+# Add handlers
+application.add_handler(CommandHandler("start", start))
+application.add_handler(CallbackQueryHandler(select_athkar, pattern="^select_athkar$"))
+application.add_handler(CallbackQueryHandler(toggle_athkar, pattern="^toggle_athkar_"))
+application.add_handler(CallbackQueryHandler(choose_frequency, pattern="^choose_frequency$"))
+application.add_handler(CallbackQueryHandler(set_frequency, pattern="^set_freq_"))
+application.add_handler(CallbackQueryHandler(edit_athkar, pattern="^edit_athkar$"))
+application.add_handler(CallbackQueryHandler(edit_frequency, pattern="^edit_frequency$"))
+application.add_handler(CallbackQueryHandler(show_prefs, pattern="^show_prefs$"))
+application.add_handler(CallbackQueryHandler(start, pattern="^start$"))
 
 # Web app for webhook
 web_app = web.Application()
-web_app.router.add_post("/webhook", webhook_handler)
+web_app.router.add_get("/", handle_root)
+web_app.router.add_post("/webhook", handle_webhook)
 
-async def startup(app):
-    """Initialize on startup"""
-    logger.info("Initializing user_side bot...")
-    await init_db()
-    await application.initialize()
-    logger.info("✅ User side bot initialized")
-
-async def shutdown(app):
-    """Cleanup on shutdown"""
-    await application.shutdown()
-
-web_app.on_startup.append(startup)
-web_app.on_cleanup.append(shutdown)
-
-# Export for use in main.py
-__all__ = ["web_app", "application", "startup", "shutdown", "init_db"]
+logger.info("✅ User side bot initialized")
