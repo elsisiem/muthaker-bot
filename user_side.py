@@ -767,6 +767,9 @@ async def ask_custom_goal(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.effective_user:
+        return
+
     kind = context.user_data.get("awaiting_custom_kind")
     if not kind:
         return
