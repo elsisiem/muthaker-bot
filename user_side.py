@@ -1047,7 +1047,9 @@ async def toggle_prayer_athkar(update: Update, context: ContextTypes.DEFAULT_TYP
     # Case 2: User doesn't have coordinates yet - ask for location
     if not prefs or prefs.latitude is None or prefs.longitude is None:
         context.user_data["awaiting_prayer_location"] = True
-        await query.edit_message_text(
+        await query.answer()
+        await context.bot.send_message(
+            chat_id=query.from_user.id,
             text=tr(lang, "prayer_prompt_location"),
             reply_markup=location_request_keyboard(lang)
         )
