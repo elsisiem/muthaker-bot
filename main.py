@@ -33,7 +33,7 @@ logging.getLogger('telegram').setLevel(logging.WARNING)
 logging.getLogger('apscheduler').setLevel(logging.WARNING)
 
 async def run_channel_bot():
-    """Run the channel posting bot (Quran + Athkar to channel)"""
+    """Run the channel posting bot (Athkar + fasting reminders to channel)"""
     logger.info("Initializing channel bot...")
 
     await test_telegram_connection()
@@ -117,7 +117,7 @@ async def main():
 
         logger.info("=" * 60)
         logger.info("ALL COMPONENTS STARTED")
-        logger.info("- Channel Bot (Quran + Athkar)")
+        logger.info("- Channel Bot (Athkar + Fasting reminders)")
         logger.info("- User Bot (listening for /start)")
         logger.info(f"- Web Server (port {port})")
         logger.info("=" * 60)
