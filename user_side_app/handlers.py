@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import aiohttp
 import pytz
 from telegram import ReplyKeyboardRemove, Update
+from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from .db import (
@@ -88,7 +89,11 @@ def frequency_to_seconds(frequency: str, custom_minutes: int | None) -> int:
 
 async def send_or_edit(update: Update, context: ContextTypes.DEFAULT_TYPE, text_value: str, reply_markup):
     if update.callback_query:
-        await update.callback_query.edit_message_text(text=text_value, reply_markup=reply_markup)
+        try:
+            await update.callback_query.edit_message_text(text=text_value, reply_markup=reply_markup)
+        except BadRequest as exc:
+            if "Message is not modified" not in str(exc):
+                raise
     else:
         await context.bot.send_message(chat_id=update.effective_chat.id, text=text_value, reply_markup=reply_markup)
 
