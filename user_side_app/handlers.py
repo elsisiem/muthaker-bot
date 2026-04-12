@@ -11,7 +11,7 @@ from .db import (
     upsert_user_prefs,
 )
 from .i18n import tr
-from .keyboards import home_menu, remove_target_menu, target_menu
+from .keyboards import channel_menu, group_menu, home_menu, language_menu, personal_menu, remove_target_menu
 
 logger = logging.getLogger(__name__)
 
@@ -66,10 +66,14 @@ async def set_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await upsert_user_prefs(str(query.from_user.id), query.from_user.first_name, language=lang)
 
-    await query.edit_message_text(
-        text=f"{tr(lang, 'lang_set')}\n\n{tr(lang, 'choose_mode')}",
-        reply_markup=home_menu(lang),
-    )
+    await query.edit_message_text(text=f"{tr(lang, 'lang_set')}\n\n{tr(lang, 'choose_mode')}", reply_markup=home_menu(lang))
+
+
+async def open_language_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(context)
+    await query.edit_message_text(text=tr(lang, "lang_menu"), reply_markup=language_menu(lang))
 
 
 async def choose_personal_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -79,24 +83,41 @@ async def choose_personal_mode(update: Update, context: ContextTypes.DEFAULT_TYP
 
     if query.from_user:
         await upsert_user_prefs(str(query.from_user.id), query.from_user.first_name, mode="personal")
+    context.user_data["active_mode"] = "personal"
 
     await query.edit_message_text(
         text=tr(lang, "personal_menu"),
-        reply_markup=home_menu(lang),
+        reply_markup=personal_menu(lang),
     )
 
 
-async def choose_target_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def choose_group_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     lang = get_lang(context)
 
     if query.from_user:
-        await upsert_user_prefs(str(query.from_user.id), query.from_user.first_name, mode="target")
+        await upsert_user_prefs(str(query.from_user.id), query.from_user.first_name, mode="group")
+    context.user_data["active_mode"] = "group"
 
     await query.edit_message_text(
-        text=tr(lang, "target_setup"),
-        reply_markup=target_menu(lang),
+        text=f"{tr(lang, 'group_menu')}\n\n{tr(lang, 'target_setup_group')}",
+        reply_markup=group_menu(lang),
+    )
+
+
+async def choose_channel_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(context)
+
+    if query.from_user:
+        await upsert_user_prefs(str(query.from_user.id), query.from_user.first_name, mode="channel")
+    context.user_data["active_mode"] = "channel"
+
+    await query.edit_message_text(
+        text=f"{tr(lang, 'channel_menu')}\n\n{tr(lang, 'target_setup_channel')}",
+        reply_markup=channel_menu(lang),
     )
 
 
@@ -108,12 +129,15 @@ async def manage_targets(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     lang = get_lang(context)
+    mode = context.user_data.get("active_mode", "group")
     targets = await list_targets(str(query.from_user.id))
 
     if not targets:
+        setup_text = tr(lang, "target_setup_channel") if mode == "channel" else tr(lang, "target_setup_group")
+        back_menu = channel_menu(lang) if mode == "channel" else group_menu(lang)
         await query.edit_message_text(
-            text=f"{tr(lang, 'target_setup')}\n\n{tr(lang, 'target_none')}",
-            reply_markup=target_menu(lang),
+            text=f"{setup_text}\n\n{tr(lang, 'target_none')}",
+            reply_markup=back_menu,
         )
         return
 
@@ -136,12 +160,14 @@ async def remove_target_callback(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     lang = get_lang(context)
+    mode = context.user_data.get("active_mode", "group")
     chat_id = query.data.replace("target_remove_", "")
     await remove_target(str(query.from_user.id), chat_id)
+    back_menu = channel_menu(lang) if mode == "channel" else group_menu(lang)
 
     await query.edit_message_text(
         text=tr(lang, "target_unlinked"),
-        reply_markup=target_menu(lang),
+        reply_markup=back_menu,
     )
 
 
@@ -172,9 +198,11 @@ async def send_test_to_targets(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     lang = get_lang(context)
+    mode = context.user_data.get("active_mode", "group")
+    back_menu = channel_menu(lang) if mode == "channel" else group_menu(lang)
     targets = await list_targets(str(query.from_user.id))
     if not targets:
-        await query.edit_message_text(text=tr(lang, "no_target_for_test"), reply_markup=target_menu(lang))
+        await query.edit_message_text(text=tr(lang, "no_target_for_test"), reply_markup=back_menu)
         return
 
     for t in targets:
@@ -183,4 +211,18 @@ async def send_test_to_targets(update: Update, context: ContextTypes.DEFAULT_TYP
         except Exception as exc:
             logger.warning("Failed sending test to %s: %s", t.chat_id, exc)
 
-    await query.edit_message_text(text=tr(lang, "test_sent"), reply_markup=target_menu(lang))
+    await query.edit_message_text(text=tr(lang, "test_sent"), reply_markup=back_menu)
+
+
+async def config_placeholder(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(context)
+    mode = context.user_data.get("active_mode", "personal")
+    if mode == "channel":
+        back_menu = channel_menu(lang)
+    elif mode == "group":
+        back_menu = group_menu(lang)
+    else:
+        back_menu = personal_menu(lang)
+    await query.edit_message_text(text=tr(lang, "cfg_comming_soon"), reply_markup=back_menu)
