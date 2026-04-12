@@ -22,6 +22,7 @@ class UserPreferences(Base):
     selected_athkar = Column(Text, nullable=True)
     frequency = Column(String, default="every_30_min")
     custom_frequency_minutes = Column(Integer, nullable=True)
+    daily_goal_count = Column(Integer, nullable=True)
     delivery_mode = Column(String, default="rotating")
     prayer_athkar_enabled = Column(Boolean, default=False)
     prayer_city = Column(String, nullable=True)
@@ -50,6 +51,7 @@ async def init_db():
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS mode VARCHAR DEFAULT 'personal'"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS frequency VARCHAR DEFAULT 'every_30_min'"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS custom_frequency_minutes INTEGER"))
+        await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS daily_goal_count INTEGER"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS delivery_mode VARCHAR DEFAULT 'rotating'"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS prayer_athkar_enabled BOOLEAN DEFAULT FALSE"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS prayer_city VARCHAR"))
@@ -92,6 +94,7 @@ async def update_user_settings(
     selected_athkar: str | None = None,
     frequency: str | None = None,
     custom_frequency_minutes: int | None = None,
+    daily_goal_count: int | None = None,
     delivery_mode: str | None = None,
     prayer_athkar_enabled: bool | None = None,
     prayer_city: str | None = None,
@@ -109,6 +112,8 @@ async def update_user_settings(
             row.frequency = frequency
         if custom_frequency_minutes is not None or frequency == "custom_interval":
             row.custom_frequency_minutes = custom_frequency_minutes
+        if daily_goal_count is not None or frequency == "goal_per_day":
+            row.daily_goal_count = daily_goal_count
         if delivery_mode is not None:
             row.delivery_mode = delivery_mode
         if prayer_athkar_enabled is not None:
