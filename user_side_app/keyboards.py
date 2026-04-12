@@ -91,13 +91,35 @@ def athkar_select_menu(lang: str, items: list[tuple[str, str, bool]]) -> InlineK
 
 def schedule_menu(lang: str) -> InlineKeyboardMarkup:
     rows = [
+        [InlineKeyboardButton(tr(lang, "strategy_interval"), callback_data="schedule_strategy_interval")],
+        [InlineKeyboardButton(tr(lang, "strategy_goal"), callback_data="schedule_strategy_goal")],
+    ]
+    rows.append(persistent_language_row(lang))
+    rows.append([InlineKeyboardButton(tr(lang, "back"), callback_data="mode_personal")])
+    return InlineKeyboardMarkup(rows)
+
+
+def interval_menu(lang: str) -> InlineKeyboardMarkup:
+    rows = [
         [InlineKeyboardButton(tr(lang, "interval_5"), callback_data="schedule_every_5")],
         [InlineKeyboardButton(tr(lang, "interval_30"), callback_data="schedule_every_30")],
         [InlineKeyboardButton(tr(lang, "interval_60"), callback_data="schedule_hourly")],
         [InlineKeyboardButton(tr(lang, "interval_custom"), callback_data="schedule_custom")],
     ]
     rows.append(persistent_language_row(lang))
-    rows.append([InlineKeyboardButton(tr(lang, "back"), callback_data="mode_personal")])
+    rows.append([InlineKeyboardButton(tr(lang, "back"), callback_data="cfg_personal_schedule")])
+    return InlineKeyboardMarkup(rows)
+
+
+def goal_menu(lang: str) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(tr(lang, "goal_100"), callback_data="schedule_goal_100")],
+        [InlineKeyboardButton(tr(lang, "goal_200"), callback_data="schedule_goal_200")],
+        [InlineKeyboardButton(tr(lang, "goal_300"), callback_data="schedule_goal_300")],
+        [InlineKeyboardButton(tr(lang, "goal_custom"), callback_data="schedule_goal_custom")],
+    ]
+    rows.append(persistent_language_row(lang))
+    rows.append([InlineKeyboardButton(tr(lang, "back"), callback_data="cfg_personal_schedule")])
     return InlineKeyboardMarkup(rows)
 
 

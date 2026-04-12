@@ -22,8 +22,10 @@ from .keyboards import (
     athkar_select_menu,
     channel_menu,
     delivery_menu,
+    goal_menu,
     group_menu,
     home_menu,
+    interval_menu,
     language_menu,
     location_request_keyboard,
     personal_menu,
@@ -82,6 +84,8 @@ def frequency_to_seconds(frequency: str, custom_minutes: int | None) -> int:
         return 300
     if frequency == "hourly":
         return 3600
+    if frequency == "goal_per_day":
+        return 300
     if frequency == "custom_interval" and custom_minutes:
         return max(60, custom_minutes * 60)
     return 1800
@@ -222,7 +226,7 @@ async def open_schedule_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
     lang = get_lang(context)
-    await query.edit_message_text(text=tr(lang, "schedule_menu_title"), reply_markup=schedule_menu(lang))
+    await query.edit_message_text(text=tr(lang, "strategy_menu_title"), reply_markup=schedule_menu(lang))
 
 
 async def set_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -231,9 +235,30 @@ async def set_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = get_lang(context)
     user_id = str(query.from_user.id)
 
+    if query.data == "schedule_strategy_interval":
+        await query.edit_message_text(text=tr(lang, "schedule_menu_title"), reply_markup=interval_menu(lang))
+        return
+
+    if query.data == "schedule_strategy_goal":
+        await query.edit_message_text(text=tr(lang, "goal_menu_title"), reply_markup=goal_menu(lang))
+        return
+
     if query.data == "schedule_custom":
         context.user_data["awaiting_custom_interval"] = True
-        await query.edit_message_text(text=tr(lang, "prompt_custom_interval"), reply_markup=personal_menu(lang))
+        await query.edit_message_text(text=tr(lang, "prompt_custom_interval"), reply_markup=interval_menu(lang))
+        return
+
+    if query.data == "schedule_goal_custom":
+        context.user_data["awaiting_custom_goal"] = True
+        await query.edit_message_text(text=tr(lang, "prompt_custom_goal"), reply_markup=goal_menu(lang))
+        return
+
+    if query.data.startswith("schedule_goal_"):
+        raw = query.data.replace("schedule_goal_", "")
+        goal_value = int(raw)
+        await update_user_settings(user_id, frequency="goal_per_day", daily_goal_count=goal_value, custom_frequency_minutes=None)
+        await rebuild_user_schedule(context)
+        await query.edit_message_text(text=tr(lang, "saved"), reply_markup=personal_menu(lang))
         return
 
     mapping = {
@@ -242,7 +267,7 @@ async def set_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "schedule_hourly": "hourly",
     }
     frequency = mapping.get(query.data, "every_30_min")
-    await update_user_settings(user_id, frequency=frequency, custom_frequency_minutes=None)
+    await update_user_settings(user_id, frequency=frequency, custom_frequency_minutes=None, daily_goal_count=None)
     await rebuild_user_schedule(context)
     await query.edit_message_text(text=tr(lang, "saved"), reply_markup=personal_menu(lang))
 
@@ -278,6 +303,7 @@ async def show_personal_settings(update: Update, context: ContextTypes.DEFAULT_T
         "every_30_min": tr(lang, "interval_30"),
         "hourly": tr(lang, "interval_60"),
         "custom_interval": f"{prefs.custom_frequency_minutes or 30} min",
+        "goal_per_day": f"{prefs.daily_goal_count or 100} / day",
     }.get((prefs.frequency if prefs else "every_30_min"), tr(lang, "interval_30"))
 
     delivery_label = tr(lang, "delivery_batch") if prefs and prefs.delivery_mode == "batch" else tr(lang, "delivery_rotating")
@@ -423,7 +449,21 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(tr(lang, "invalid_number"))
             return
         context.user_data["awaiting_custom_interval"] = False
-        await update_user_settings(user_id, frequency="custom_interval", custom_frequency_minutes=minutes)
+        await update_user_settings(user_id, frequency="custom_interval", custom_frequency_minutes=minutes, daily_goal_count=None)
+        await rebuild_user_schedule(context)
+        await update.message.reply_text(tr(lang, "saved"))
+        return
+
+    if context.user_data.get("awaiting_custom_goal"):
+        if not text_value.isdigit():
+            await update.message.reply_text(tr(lang, "invalid_number"))
+            return
+        goal_count = int(text_value)
+        if goal_count < 1 or goal_count > 10000:
+            await update.message.reply_text(tr(lang, "invalid_number"))
+            return
+        context.user_data["awaiting_custom_goal"] = False
+        await update_user_settings(user_id, frequency="goal_per_day", daily_goal_count=goal_count, custom_frequency_minutes=None)
         await rebuild_user_schedule(context)
         await update.message.reply_text(tr(lang, "saved"))
         return
@@ -505,7 +545,10 @@ async def send_prayer_message(telegram_id: str, kind: str):
 async def build_jobs_for_user(user):
     selected = parse_selected(user.selected_athkar)
     if selected:
-        seconds = frequency_to_seconds(user.frequency or "every_30_min", user.custom_frequency_minutes)
+        if user.frequency == "goal_per_day" and user.daily_goal_count and user.daily_goal_count > 0:
+            seconds = max(60, int(round(86400 / user.daily_goal_count)))
+        else:
+            seconds = frequency_to_seconds(user.frequency or "every_30_min", user.custom_frequency_minutes)
         reminder_scheduler.add_job(
             send_user_reminder,
             trigger="interval",
