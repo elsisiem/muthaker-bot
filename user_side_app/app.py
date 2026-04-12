@@ -18,6 +18,7 @@ from .handlers import (
     send_test_to_targets,
     set_language,
     start,
+    version,
 )
 from .scheduler import start_user_reminder_scheduler, stop_user_reminder_scheduler
 
@@ -27,6 +28,7 @@ application = Application.builder().token(TOKEN).build()
 
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CommandHandler("link", link_target))
+application.add_handler(CommandHandler("version", version))
 
 application.add_handler(CallbackQueryHandler(set_language, pattern="^lang_(ar|en)$"))
 application.add_handler(CallbackQueryHandler(open_language_menu, pattern="^open_lang_menu$"))

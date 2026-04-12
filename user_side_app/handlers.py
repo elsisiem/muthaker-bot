@@ -14,6 +14,7 @@ from .i18n import tr
 from .keyboards import channel_menu, group_menu, home_menu, language_menu, personal_menu, remove_target_menu
 
 logger = logging.getLogger(__name__)
+UI_BUILD = "user-side-v173a"
 
 
 def get_lang(context: ContextTypes.DEFAULT_TYPE, fallback: str = "ar") -> str:
@@ -40,7 +41,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await upsert_user_prefs(user_id, first_name, language=lang)
 
-    text_value = f"{tr(lang, 'welcome')}\n\n{tr(lang, 'choose_mode')}"
+    text_value = f"{tr(lang, 'welcome')}\n\n{tr(lang, 'choose_mode')}\n\n({UI_BUILD})"
     await send_or_edit(update, context, text_value, home_menu(lang))
 
 
@@ -49,8 +50,18 @@ async def go_home(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     lang = get_lang(context)
     await query.edit_message_text(
-        text=f"{tr(lang, 'welcome')}\n\n{tr(lang, 'choose_mode')}",
+        text=f"{tr(lang, 'welcome')}\n\n{tr(lang, 'choose_mode')}\n\n({UI_BUILD})",
         reply_markup=home_menu(lang),
+    )
+
+
+async def version(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_chat:
+        return
+    chat_type = update.effective_chat.type if update.effective_chat else "unknown"
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=f"{UI_BUILD}\nchat_type={chat_type}\nmodule=user_side_app.handlers",
     )
 
 
