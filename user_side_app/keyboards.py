@@ -1,4 +1,4 @@
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 
 from .i18n import tr
 
@@ -36,6 +36,8 @@ def personal_menu(lang: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(tr(lang, "cfg_athkar"), callback_data="cfg_personal_athkar")],
         [InlineKeyboardButton(tr(lang, "cfg_schedule"), callback_data="cfg_personal_schedule")],
         [InlineKeyboardButton(tr(lang, "cfg_delivery"), callback_data="cfg_personal_delivery")],
+        [InlineKeyboardButton(tr(lang, "cfg_prayer"), callback_data="cfg_personal_prayer")],
+        [InlineKeyboardButton(tr(lang, "show_settings"), callback_data="cfg_personal_show")],
         persistent_language_row(lang),
         [InlineKeyboardButton(tr(lang, "back"), callback_data="home")],
     ])
@@ -70,3 +72,49 @@ def remove_target_menu(lang: str, targets: list[tuple[str, str]]) -> InlineKeybo
     rows.append(persistent_language_row(lang))
     rows.append([InlineKeyboardButton(tr(lang, "back"), callback_data="home")])
     return InlineKeyboardMarkup(rows)
+
+
+def athkar_select_menu(lang: str, items: list[tuple[str, str, bool]]) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for athkar_id, label, selected in items:
+        prefix = "✓ " if selected else "○ "
+        rows.append([InlineKeyboardButton(f"{prefix}{label}", callback_data=f"athkar_toggle_{athkar_id}")])
+    rows.append([
+        InlineKeyboardButton(tr(lang, "choose_all"), callback_data="athkar_select_all"),
+        InlineKeyboardButton(tr(lang, "clear_all"), callback_data="athkar_clear_all"),
+    ])
+    rows.append([InlineKeyboardButton(tr(lang, "save"), callback_data="athkar_save")])
+    rows.append(persistent_language_row(lang))
+    rows.append([InlineKeyboardButton(tr(lang, "back"), callback_data="mode_personal")])
+    return InlineKeyboardMarkup(rows)
+
+
+def schedule_menu(lang: str) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(tr(lang, "interval_5"), callback_data="schedule_every_5")],
+        [InlineKeyboardButton(tr(lang, "interval_30"), callback_data="schedule_every_30")],
+        [InlineKeyboardButton(tr(lang, "interval_60"), callback_data="schedule_hourly")],
+        [InlineKeyboardButton(tr(lang, "interval_custom"), callback_data="schedule_custom")],
+    ]
+    rows.append(persistent_language_row(lang))
+    rows.append([InlineKeyboardButton(tr(lang, "back"), callback_data="mode_personal")])
+    return InlineKeyboardMarkup(rows)
+
+
+def delivery_menu(lang: str) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(tr(lang, "delivery_rotating"), callback_data="delivery_rotating")],
+        [InlineKeyboardButton(tr(lang, "delivery_batch"), callback_data="delivery_batch")],
+    ]
+    rows.append(persistent_language_row(lang))
+    rows.append([InlineKeyboardButton(tr(lang, "back"), callback_data="mode_personal")])
+    return InlineKeyboardMarkup(rows)
+
+
+def location_request_keyboard(lang: str) -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [[KeyboardButton(tr(lang, "btn_share_location"), request_location=True)]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+        selective=True,
+    )
