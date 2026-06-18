@@ -3,10 +3,16 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton,
 from .i18n import tr
 
 
+LANGUAGE_CODES = ("ar", "en", "es", "fr", "tr")
+
+
 def language_row(lang: str) -> list[InlineKeyboardButton]:
     return [
         InlineKeyboardButton(f"🇸🇦 {tr(lang, 'lang_ar')}", callback_data="lang_ar"),
         InlineKeyboardButton(f"🇬🇧 {tr(lang, 'lang_en')}", callback_data="lang_en"),
+        InlineKeyboardButton(f"🇪🇸 {tr(lang, 'lang_es')}", callback_data="lang_es"),
+        InlineKeyboardButton(f"🇫🇷 {tr(lang, 'lang_fr')}", callback_data="lang_fr"),
+        InlineKeyboardButton(f"🇹🇷 {tr(lang, 'lang_tr')}", callback_data="lang_tr"),
     ]
 
 
@@ -26,7 +32,8 @@ def home_menu(lang: str) -> InlineKeyboardMarkup:
 
 def language_menu(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        language_row(lang),
+        language_row(lang)[:3],
+        language_row(lang)[3:],
         [InlineKeyboardButton(tr(lang, "back"), callback_data="home")],
     ])
 
@@ -139,4 +146,5 @@ def location_request_keyboard(lang: str) -> ReplyKeyboardMarkup:
         resize_keyboard=True,
         one_time_keyboard=True,
         selective=True,
+        input_field_placeholder=tr(lang, "prayer_city_prompt"),
     )

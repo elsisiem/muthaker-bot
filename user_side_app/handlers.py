@@ -17,7 +17,7 @@ from .db import (
     update_user_settings,
     upsert_user_prefs,
 )
-from .i18n import tr
+from .i18n import normalize_lang, tr
 from .keyboards import (
     athkar_select_menu,
     channel_menu,
@@ -54,7 +54,7 @@ rotation_state: dict[str, int] = {}
 
 
 def get_lang(context: ContextTypes.DEFAULT_TYPE, fallback: str = "ar") -> str:
-    return "en" if context.user_data.get("lang") == "en" else fallback
+    return normalize_lang(context.user_data.get("lang"), fallback)
 
 
 def parse_selected(raw: str | None) -> list[str]:
@@ -68,7 +68,7 @@ def parse_selected(raw: str | None) -> list[str]:
 
 
 def selected_names(selected_ids: list[str], lang: str) -> list[str]:
-    key = "en" if lang == "en" else "ar"
+    key = "ar" if lang == "ar" else "en"
     return [x[key] for x in ATHKAR_OPTIONS if x["id"] in selected_ids]
 
 
@@ -110,7 +110,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     first_name = update.effective_user.first_name
     prefs = await get_user_prefs(user_id)
 
-    lang = prefs.language if prefs and prefs.language in ("ar", "en") else "ar"
+    lang = normalize_lang(prefs.language if prefs else None, "ar")
     context.user_data["lang"] = lang
     await upsert_user_prefs(user_id, first_name, language=lang)
 
@@ -144,10 +144,64 @@ async def set_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not query.from_user:
         return
 
-    lang = "en" if query.data == "lang_en" else "ar"
+    lang = normalize_lang(query.data.replace("lang_", ""), "ar")
     context.user_data["lang"] = lang
     await upsert_user_prefs(str(query.from_user.id), query.from_user.first_name, language=lang)
     await query.edit_message_text(text=f"{tr(lang, 'lang_set')}\n\n{tr(lang, 'choose_mode')}", reply_markup=home_menu(lang))
+
+
+async def resolve_timezone_from_coords(latitude: float, longitude: float):
+    open_meteo_url = "https://api.open-meteo.com/v1/forecast"
+    open_meteo_params = {
+        "latitude": latitude,
+        "longitude": longitude,
+        "hourly": "temperature_2m",
+        "forecast_days": 1,
+        "timezone": "auto",
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(open_meteo_url, params=open_meteo_params, timeout=15) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    timezone_name = data.get("timezone")
+                    if timezone_name:
+                        return timezone_name
+    except Exception:
+        logger.exception("Open-Meteo timezone lookup failed")
+
+    aladhan_url = "https://api.aladhan.com/v1/timings"
+    aladhan_params = {"latitude": latitude, "longitude": longitude, "method": 3}
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(aladhan_url, params=aladhan_params, timeout=15) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+                return data.get("data", {}).get("meta", {}).get("timezone")
+    except Exception:
+        logger.exception("Aladhan timezone lookup failed")
+        return None
+
+
+async def resolve_city_label_from_coords(latitude: float, longitude: float):
+    url = "https://nominatim.openstreetmap.org/reverse"
+    params = {"lat": latitude, "lon": longitude, "format": "jsonv2"}
+    headers = {"User-Agent": "muthaker-bot/1.0"}
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, params=params, headers=headers, timeout=15) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+                address = data.get("address", {})
+                return address.get("city") or address.get("town") or address.get("village") or address.get("state")
+    except Exception:
+        logger.exception("Reverse geocoding failed")
+        return None
 
 
 async def open_language_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -339,44 +393,14 @@ async def toggle_prayer(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data["awaiting_prayer_setup"] = True
     await query.edit_message_text(
-        text=f"{tr(lang, 'prayer_need_location')}\n\n{tr(lang, 'prayer_privacy_note')}\n\n{tr(lang, 'prayer_city_prompt')}",
+        text=f"{tr(lang, 'prayer_prompt_title')}\n\n{tr(lang, 'prayer_prompt_help')}\n\n{tr(lang, 'prayer_prompt_privacy')}\n\n{tr(lang, 'prayer_prompt_city')}",
         reply_markup=personal_menu(lang),
     )
     await context.bot.send_message(
         chat_id=query.from_user.id,
-        text=tr(lang, "prayer_need_location"),
+        text=f"{tr(lang, 'prayer_prompt_title')}\n\n{tr(lang, 'prayer_prompt_help')}",
         reply_markup=location_request_keyboard(lang),
     )
-
-
-async def fetch_timezone_by_coords(latitude: float, longitude: float):
-    url = "https://api.open-meteo.com/v1/forecast"
-    params = {
-        "latitude": latitude,
-        "longitude": longitude,
-        "hourly": "temperature_2m",
-        "forecast_days": 1,
-        "timezone": "auto",
-    }
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, params=params, timeout=15) as resp:
-            if resp.status != 200:
-                return None
-            data = await resp.json()
-            return data.get("timezone")
-
-
-async def reverse_city(latitude: float, longitude: float):
-    url = "https://nominatim.openstreetmap.org/reverse"
-    params = {"lat": latitude, "lon": longitude, "format": "jsonv2"}
-    headers = {"User-Agent": "muthaker-bot/1.0"}
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, params=params, headers=headers, timeout=15) as resp:
-            if resp.status != 200:
-                return None
-            data = await resp.json()
-            address = data.get("address", {})
-            return address.get("city") or address.get("town") or address.get("village") or address.get("state")
 
 
 async def city_to_coords(city: str):
@@ -405,8 +429,8 @@ async def handle_location_input(update: Update, context: ContextTypes.DEFAULT_TY
     latitude = update.message.location.latitude
     longitude = update.message.location.longitude
 
-    timezone_name = await fetch_timezone_by_coords(latitude, longitude)
-    city = await reverse_city(latitude, longitude)
+    timezone_name = await resolve_timezone_from_coords(latitude, longitude)
+    city = await resolve_city_label_from_coords(latitude, longitude)
 
     try:
         await update.message.delete()
@@ -429,7 +453,11 @@ async def handle_location_input(update: Update, context: ContextTypes.DEFAULT_TY
     )
     context.user_data["awaiting_prayer_setup"] = False
     await rebuild_user_schedule(context)
-    await context.bot.send_message(chat_id=update.effective_chat.id, text=tr(lang, "prayer_enabled_done"), reply_markup=ReplyKeyboardRemove())
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=f"{tr(lang, 'prayer_enabled_done')}\n{tr(lang, 'prayer_timezone_detected').replace('{timezone}', timezone_name)}\n{tr(lang, 'prayer_city_saved').replace('{city}', city)}",
+        reply_markup=ReplyKeyboardRemove(),
+    )
 
 
 async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -473,7 +501,7 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if lat is None or lon is None:
             await update.message.reply_text(tr(lang, "prayer_city_failed"))
             return
-        timezone_name = await fetch_timezone_by_coords(lat, lon)
+        timezone_name = await resolve_timezone_from_coords(lat, lon)
         if not timezone_name:
             await update.message.reply_text(tr(lang, "prayer_city_failed"))
             return
@@ -485,7 +513,11 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         context.user_data["awaiting_prayer_setup"] = False
         await rebuild_user_schedule(context)
-        await update.message.reply_text(tr(lang, "prayer_enabled_done"), reply_markup=ReplyKeyboardRemove())
+        city_name = display.split(",")[0]
+        await update.message.reply_text(
+            f"{tr(lang, 'prayer_enabled_done')}\n{tr(lang, 'prayer_timezone_detected').replace('{timezone}', timezone_name)}\n{tr(lang, 'prayer_city_saved').replace('{city}', city_name)}",
+            reply_markup=ReplyKeyboardRemove(),
+        )
         return
 
 
@@ -496,7 +528,7 @@ async def send_user_reminder(telegram_id: str):
     selected = parse_selected(prefs.selected_athkar)
     if not selected:
         return
-    lang = "en" if prefs.language == "en" else "ar"
+    lang = "ar" if prefs.language == "ar" else "en"
     if prefs.delivery_mode == "batch":
         ids = selected
     else:

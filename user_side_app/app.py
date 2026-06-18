@@ -43,7 +43,7 @@ application.add_handler(CommandHandler("start", start))
 application.add_handler(CommandHandler("link", link_target))
 application.add_handler(CommandHandler("version", version))
 
-application.add_handler(CallbackQueryHandler(set_language, pattern="^lang_(ar|en)$"))
+application.add_handler(CallbackQueryHandler(set_language, pattern="^lang_[a-z]{2}$"))
 application.add_handler(CallbackQueryHandler(open_language_menu, pattern="^open_lang_menu$"))
 application.add_handler(CallbackQueryHandler(go_home, pattern="^home$"))
 application.add_handler(CallbackQueryHandler(choose_personal_mode, pattern="^mode_personal$"))
