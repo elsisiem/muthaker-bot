@@ -91,7 +91,7 @@ def community_connect_menu(lang: str) -> InlineKeyboardMarkup:
 
 def community_menu(lang: str, target) -> InlineKeyboardMarkup:
     def state(enabled: bool) -> str:
-        return "✓" if enabled else "○"
+        return "✅" if enabled else "⚪"
 
     rows = [
         [
@@ -137,7 +137,8 @@ def remove_target_menu(lang: str, targets: list[tuple[str, str]]) -> InlineKeybo
 def athkar_select_menu(lang: str, items: list[tuple[str, str, bool]]) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     for athkar_id, label, selected in items:
-        prefix = "✓ " if selected else "× "
+        # Keep the selected mark compact; all other actions use normal emoji.
+        prefix = "✓ " if selected else "✖️ "
         rows.append([InlineKeyboardButton(f"{prefix}{label}", callback_data=f"athkar_toggle_{athkar_id}")])
     rows.append([
         InlineKeyboardButton(tr(lang, "clear_all"), callback_data="athkar_clear_all"),
