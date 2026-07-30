@@ -224,6 +224,14 @@ async def choose_personal_mode(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.edit_message_text(text=tr(lang, "personal_menu"), reply_markup=personal_menu(lang))
 
 
+async def begin_personal_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start the compact, ordered configuration journey."""
+    query = update.callback_query
+    await query.answer()
+    context.user_data["setup_flow"] = True
+    await open_personal_athkar(update, context)
+
+
 async def open_personal_athkar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -274,8 +282,16 @@ async def save_athkar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = get_lang(context)
     user_id = str(query.from_user.id)
     selected = context.user_data.get("draft_selected", [])
+    if not selected:
+        key = "en" if lang == "en" else "ar"
+        items = [(x["id"], x[key], False) for x in ATHKAR_OPTIONS]
+        await query.edit_message_text(text=tr(lang, "need_athkar"), reply_markup=athkar_select_menu(lang, items))
+        return
     await update_user_settings(user_id, selected_athkar=json.dumps(selected))
     await rebuild_user_schedule(context)
+    if context.user_data.get("setup_flow"):
+        await query.edit_message_text(text=tr(lang, "setup_step_schedule"), reply_markup=schedule_menu(lang))
+        return
     await query.edit_message_text(text=tr(lang, "athkar_saved"), reply_markup=personal_menu(lang))
 
 
@@ -315,7 +331,7 @@ async def set_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
         goal_value = int(raw)
         await update_user_settings(user_id, frequency="goal_per_day", daily_goal_count=goal_value, custom_frequency_minutes=None)
         await rebuild_user_schedule(context)
-        await query.edit_message_text(text=tr(lang, "saved"), reply_markup=personal_menu(lang))
+        await continue_after_schedule(query, context, lang)
         return
 
     mapping = {
@@ -326,7 +342,14 @@ async def set_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
     frequency = mapping.get(query.data, "every_30_min")
     await update_user_settings(user_id, frequency=frequency, custom_frequency_minutes=None, daily_goal_count=None)
     await rebuild_user_schedule(context)
-    await query.edit_message_text(text=tr(lang, "saved"), reply_markup=personal_menu(lang))
+    await continue_after_schedule(query, context, lang)
+
+
+async def continue_after_schedule(query, context: ContextTypes.DEFAULT_TYPE, lang: str):
+    if context.user_data.get("setup_flow"):
+        await query.edit_message_text(text=tr(lang, "setup_step_delivery"), reply_markup=delivery_menu(lang))
+    else:
+        await query.edit_message_text(text=tr(lang, "saved"), reply_markup=personal_menu(lang))
 
 
 async def open_delivery_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -352,7 +375,11 @@ async def set_quiet_hours(update: Update, context: ContextTypes.DEFAULT_TYPE):
     start, end = QUIET_HOUR_PRESETS[preset]
     await update_user_settings(str(query.from_user.id), quiet_hours_preset=preset, quiet_start_hour=start, quiet_end_hour=end)
     await rebuild_user_schedule(context)
-    await query.edit_message_text(text=tr(get_lang(context), "saved"), reply_markup=personal_menu(get_lang(context)))
+    lang = get_lang(context)
+    if context.user_data.pop("setup_flow", False):
+        await query.edit_message_text(text=tr(lang, "setup_complete"), reply_markup=personal_menu(lang))
+    else:
+        await query.edit_message_text(text=tr(lang, "saved"), reply_markup=personal_menu(lang))
 
 
 async def begin_timezone_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -372,7 +399,10 @@ async def set_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mode = "batch" if query.data == "delivery_batch" else "rotating"
     await update_user_settings(user_id, delivery_mode=mode)
     await rebuild_user_schedule(context)
-    await query.edit_message_text(text=tr(lang, "saved"), reply_markup=personal_menu(lang))
+    if context.user_data.get("setup_flow"):
+        await query.edit_message_text(text=tr(lang, "setup_step_quiet"), reply_markup=quiet_hours_menu(lang))
+    else:
+        await query.edit_message_text(text=tr(lang, "saved"), reply_markup=personal_menu(lang))
 
 
 async def show_personal_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -504,7 +534,10 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["awaiting_custom_interval"] = False
         await update_user_settings(user_id, frequency="custom_interval", custom_frequency_minutes=minutes, daily_goal_count=None)
         await rebuild_user_schedule(context)
-        await update.message.reply_text(tr(lang, "saved"))
+        if context.user_data.get("setup_flow"):
+            await update.message.reply_text(tr(lang, "setup_step_delivery"), reply_markup=delivery_menu(lang))
+        else:
+            await update.message.reply_text(tr(lang, "saved"))
         return
 
     if context.user_data.get("awaiting_custom_goal"):
@@ -518,7 +551,10 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["awaiting_custom_goal"] = False
         await update_user_settings(user_id, frequency="goal_per_day", daily_goal_count=goal_count, custom_frequency_minutes=None)
         await rebuild_user_schedule(context)
-        await update.message.reply_text(tr(lang, "saved"))
+        if context.user_data.get("setup_flow"):
+            await update.message.reply_text(tr(lang, "setup_step_delivery"), reply_markup=delivery_menu(lang))
+        else:
+            await update.message.reply_text(tr(lang, "saved"))
         return
 
     if context.user_data.get("awaiting_timezone_setup"):

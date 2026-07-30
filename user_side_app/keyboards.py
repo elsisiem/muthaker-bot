@@ -40,11 +40,8 @@ def language_menu(lang: str) -> InlineKeyboardMarkup:
 
 def personal_menu(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(tr(lang, "cfg_athkar"), callback_data="cfg_personal_athkar")],
-        [InlineKeyboardButton(tr(lang, "cfg_schedule"), callback_data="cfg_personal_schedule")],
-        [InlineKeyboardButton(tr(lang, "cfg_delivery"), callback_data="cfg_personal_delivery")],
+        [InlineKeyboardButton(tr(lang, "setup_reminders"), callback_data="cfg_personal_setup")],
         [InlineKeyboardButton(tr(lang, "cfg_prayer"), callback_data="cfg_personal_prayer")],
-        [InlineKeyboardButton(tr(lang, "cfg_quiet_hours"), callback_data="cfg_personal_quiet")],
         [InlineKeyboardButton(tr(lang, "cfg_timezone"), callback_data="cfg_personal_timezone")],
         [InlineKeyboardButton(tr(lang, "show_settings"), callback_data="cfg_personal_show")],
         persistent_language_row(lang),

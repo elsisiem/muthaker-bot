@@ -10,6 +10,7 @@ from .handlers import (
     choose_channel_mode,
     choose_group_mode,
     choose_personal_mode,
+    begin_personal_setup,
     clear_all_athkar,
     handle_location_input,
     handle_text_input,
@@ -50,6 +51,7 @@ application.add_handler(CallbackQueryHandler(set_language, pattern="^lang_[a-z]{
 application.add_handler(CallbackQueryHandler(open_language_menu, pattern="^open_lang_menu$"))
 application.add_handler(CallbackQueryHandler(go_home, pattern="^home$"))
 application.add_handler(CallbackQueryHandler(choose_personal_mode, pattern="^mode_personal$"))
+application.add_handler(CallbackQueryHandler(begin_personal_setup, pattern="^cfg_personal_setup$"))
 application.add_handler(CallbackQueryHandler(choose_group_mode, pattern="^mode_group$"))
 application.add_handler(CallbackQueryHandler(choose_channel_mode, pattern="^mode_channel$"))
 application.add_handler(CallbackQueryHandler(open_personal_athkar, pattern="^cfg_personal_athkar$"))
