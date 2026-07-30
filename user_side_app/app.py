@@ -1,6 +1,7 @@
 import logging
 
 from aiohttp import web
+from telegram import BotCommand
 from telegram.ext import Application, CallbackQueryHandler, ChatMemberHandler, CommandHandler, MessageHandler, filters
 from telegram.error import BadRequest
 
@@ -10,6 +11,7 @@ from .handlers import (
     auto_register_target,
     choose_channel_mode,
     choose_community_mode,
+    choose_goal_scope,
     choose_group_mode,
     choose_personal_mode,
     close_to_home,
@@ -36,6 +38,9 @@ from .handlers import (
     set_language,
     set_quiet_hours,
     set_schedule,
+    set_goal_value,
+    set_advanced_goal,
+    settings_command,
     start,
     show_personal_settings,
     toggle_athkar,
@@ -67,6 +72,7 @@ async def log_error(update, context):
     logger.error("Unhandled bot update error", exc_info=context.error)
 
 application.add_handler(CommandHandler("start", start))
+application.add_handler(CommandHandler("settings", settings_command))
 application.add_handler(CommandHandler("link", link_target))
 application.add_handler(CommandHandler("version", version))
 application.add_handler(ChatMemberHandler(auto_register_target, ChatMemberHandler.MY_CHAT_MEMBER))
@@ -90,6 +96,9 @@ application.add_handler(CallbackQueryHandler(clear_all_athkar, pattern="^athkar_
 application.add_handler(CallbackQueryHandler(save_athkar, pattern="^athkar_save$"))
 application.add_handler(CallbackQueryHandler(open_schedule_menu, pattern="^cfg_personal_schedule$"))
 application.add_handler(CallbackQueryHandler(set_schedule, pattern="^schedule_"))
+application.add_handler(CallbackQueryHandler(choose_goal_scope, pattern="^goal_scope_"))
+application.add_handler(CallbackQueryHandler(set_goal_value, pattern="^goal_(total|each)_"))
+application.add_handler(CallbackQueryHandler(set_advanced_goal, pattern="^goal_adv_"))
 application.add_handler(CallbackQueryHandler(open_delivery_menu, pattern="^cfg_personal_delivery$"))
 application.add_handler(CallbackQueryHandler(set_delivery, pattern="^delivery_(rotating|batch)$"))
 application.add_handler(CallbackQueryHandler(toggle_prayer, pattern="^cfg_personal_prayer$"))
@@ -118,6 +127,14 @@ application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_t
 application.add_error_handler(log_error)
 
 
+async def configure_command_menu():
+    """Keep Start and Settings visible in Telegram's native command menu."""
+    await application.bot.set_my_commands([
+        BotCommand("start", "البدء"),
+        BotCommand("settings", "عرض الإعدادات"),
+    ])
+
+
 async def handle_root(request):
     return web.Response(text="User side bot is running")
 
@@ -131,4 +148,5 @@ __all__ = [
     "init_db",
     "start_user_reminder_scheduler",
     "stop_user_reminder_scheduler",
+    "configure_command_menu",
 ]

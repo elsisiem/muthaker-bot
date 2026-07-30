@@ -17,7 +17,7 @@ from fazkerbot import (
 )
 
 # User side imports
-from user_side_app.app import web_app, application, init_db, start_user_reminder_scheduler, stop_user_reminder_scheduler
+from user_side_app.app import web_app, application, configure_command_menu, init_db, start_user_reminder_scheduler, stop_user_reminder_scheduler
 from user_side_app.handlers import build_jobs_for_user
 from user_side_app.scheduler import rebuild_all_jobs, schedule_community_dispatch, schedule_daily_rebuild, set_application
 from user_side_app.community_dispatcher import dispatch_community_posts
@@ -79,6 +79,7 @@ async def run_user_bot():
     try:
         await application.initialize()
         await application.start()
+        await configure_command_menu()
 
         await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
         logger.info("User bot polling active")
