@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from pathlib import Path
 from datetime import datetime, timedelta
 
@@ -11,11 +12,14 @@ from telegram.ext import ContextTypes
 
 from .db import (
     add_or_update_target,
+    create_community_post,
     get_target,
     get_user_prefs,
+    list_community_posts,
     list_active_users,
     list_targets,
     remove_target,
+    remove_community_post,
     update_target_settings,
     update_user_settings,
     upsert_user_prefs,
@@ -25,6 +29,7 @@ from .keyboards import (
     athkar_select_menu,
     community_connect_menu,
     community_menu,
+    community_posts_menu,
     delivery_menu,
     goal_menu,
     home_menu,
@@ -32,6 +37,8 @@ from .keyboards import (
     language_menu,
     location_request_keyboard,
     personal_menu,
+    post_prayer_anchor_menu,
+    post_schedule_menu,
     quiet_hours_menu,
     remove_target_menu,
     schedule_menu,
@@ -562,10 +569,70 @@ async def city_to_coords(city: str):
             return float(top["lat"]), float(top["lon"]), top.get("display_name", city)
 
 
+async def begin_community_location_setup(query, context: ContextTypes.DEFAULT_TYPE, lang: str):
+    """Ask for a one-time location share, keeping a typed city as the fallback."""
+    context.user_data["awaiting_target_location"] = True
+    context.user_data["target_location_main_message_id"] = query.message.message_id
+    await query.edit_message_text(text=tr(lang, "community_location_prompt"), reply_markup=community_connect_menu(lang))
+    prompt = await context.bot.send_message(
+        chat_id=query.from_user.id,
+        text=tr(lang, "community_location_prompt"),
+        reply_markup=location_request_keyboard(lang),
+    )
+    context.user_data["target_location_prompt_id"] = prompt.message_id
+
+
+async def complete_community_location(update: Update, context: ContextTypes.DEFAULT_TYPE, *, latitude: float, longitude: float, city: str | None, timezone_name: str):
+    """Persist only derived city/timezone and reopen the configured target."""
+    lang = get_lang(context)
+    user_id = str(update.effective_user.id)
+    target = await get_target(user_id, context.user_data.get("selected_target_id", ""))
+    if not target:
+        return
+    if not city:
+        context.user_data.pop("awaiting_target_location", None)
+        context.user_data["awaiting_target_city"] = True
+        await update.message.reply_text(tr(lang, "community_city_prompt"), reply_markup=ReplyKeyboardRemove())
+        return
+    target = await update_target_settings(
+        user_id, target.chat_id, city=city, timezone=timezone_name,
+    )
+    context.user_data.pop("awaiting_target_location", None)
+    context.user_data.pop("awaiting_target_city", None)
+    timings = await fetch_prayer_times(city, datetime.now(pytz.timezone(timezone_name)).date(), target.prayer_method or 3, latitude, longitude)
+    saved = tr(lang, "community_city_saved").replace("{target}", target.chat_title or target.chat_id).replace("{city}", city).replace("{timezone}", timezone_name)
+    text_value = f"{saved}\n\n{format_community_prayer_times(lang, target, timings)}" if timings else f"{saved}\n\n{tr(lang, 'community_prayer_failed')}"
+
+    main_message_id = context.user_data.pop("target_location_main_message_id", None)
+    prompt_message_id = context.user_data.pop("target_location_prompt_id", None)
+    try:
+        await update.message.delete()
+        if prompt_message_id:
+            await context.bot.delete_message(update.effective_chat.id, prompt_message_id)
+        keyboard_reset = await context.bot.send_message(chat_id=update.effective_chat.id, text=".", reply_markup=ReplyKeyboardRemove())
+        await keyboard_reset.delete()
+    except Exception:
+        logger.debug("Could not remove temporary community location messages", exc_info=True)
+    if main_message_id:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id, message_id=main_message_id,
+                text=text_value, reply_markup=community_menu(lang, target),
+            )
+            return
+        except BadRequest:
+            logger.debug("Could not update community location message", exc_info=True)
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=text_value, reply_markup=community_menu(lang, target))
+
+
 async def handle_location_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.location or not update.effective_user:
         return
-    if not (context.user_data.get("awaiting_prayer_setup") or context.user_data.get("awaiting_timezone_setup")):
+    if not (
+        context.user_data.get("awaiting_prayer_setup")
+        or context.user_data.get("awaiting_timezone_setup")
+        or context.user_data.get("awaiting_target_location")
+    ):
         return
 
     lang = get_lang(context)
@@ -577,6 +644,14 @@ async def handle_location_input(update: Update, context: ContextTypes.DEFAULT_TY
 
     if not timezone_name:
         await update.message.reply_text(tr(lang, "prayer_location_failed"), reply_markup=ReplyKeyboardRemove())
+        return
+
+    if context.user_data.get("awaiting_target_location"):
+        city = await resolve_city_label_from_coords(latitude, longitude)
+        await complete_community_location(
+            update, context, latitude=latitude, longitude=longitude,
+            city=city, timezone_name=timezone_name,
+        )
         return
 
     prayer_setup = context.user_data.pop("awaiting_prayer_setup", False)
@@ -681,10 +756,50 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(tr(lang, "saved"))
         return
 
-    if context.user_data.get("awaiting_target_city"):
+    if context.user_data.get("awaiting_community_post_text"):
+        draft = context.user_data.get("draft_community_post")
+        if not draft:
+            context.user_data.pop("awaiting_community_post_text", None)
+            return
+        draft["text_content"] = text_value
+        context.user_data.pop("awaiting_community_post_text", None)
+        await update.message.reply_text(tr(lang, "post_schedule_title"), reply_markup=post_schedule_menu(lang))
+        return
+
+    if context.user_data.get("awaiting_community_post_clock"):
+        time_value = normalize_digits(text_value).replace("٫", ":").replace("：", ":")
+        if not re.fullmatch(r"\d{1,2}:\d{2}", time_value):
+            await update.message.reply_text(tr(lang, "post_invalid_time"))
+            return
+        hour, minute = map(int, time_value.split(":"))
+        if hour > 23 or minute > 59:
+            await update.message.reply_text(tr(lang, "post_invalid_time"))
+            return
+        post = await save_community_post(update, context, schedule_type="clock", time_of_day=f"{hour:02d}:{minute:02d}")
+        if not post:
+            return
+        target = await get_target(user_id, context.user_data.get("selected_target_id", ""))
+        posts = await list_community_posts(user_id, target.chat_id)
+        await update.message.reply_text(tr(lang, "post_saved"), reply_markup=community_posts_menu(lang, posts))
+        return
+
+    if context.user_data.get("awaiting_community_post_interval"):
+        if not numeric_value.isdigit() or not 5 <= int(numeric_value) <= 1440:
+            await update.message.reply_text(tr(lang, "post_prompt_interval"))
+            return
+        post = await save_community_post(update, context, schedule_type="interval", interval_minutes=int(numeric_value))
+        if not post:
+            return
+        target = await get_target(user_id, context.user_data.get("selected_target_id", ""))
+        posts = await list_community_posts(user_id, target.chat_id)
+        await update.message.reply_text(tr(lang, "post_saved"), reply_markup=community_posts_menu(lang, posts))
+        return
+
+    if context.user_data.get("awaiting_target_city") or context.user_data.get("awaiting_target_location"):
         target = await get_target(user_id, context.user_data.get("selected_target_id", ""))
         if not target:
             context.user_data.pop("awaiting_target_city", None)
+            context.user_data.pop("awaiting_target_location", None)
             await update.message.reply_text(tr(lang, "target_none"), reply_markup=community_connect_menu(lang))
             return
         lat, lon, display = await city_to_coords(text_value)
@@ -696,9 +811,18 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(tr(lang, "community_city_failed"))
             return
         city_name = display.split(",")[0]
-        target = await update_target_settings(user_id, target.chat_id, city=city_name, timezone=timezone_name)
+        if context.user_data.get("awaiting_target_location"):
+            await complete_community_location(
+                update, context, latitude=lat, longitude=lon,
+                city=city_name, timezone_name=timezone_name,
+            )
+            return
+        target = await update_target_settings(
+            user_id, target.chat_id, city=city_name, timezone=timezone_name,
+        )
         context.user_data.pop("awaiting_target_city", None)
-        timings = await fetch_prayer_times(city_name, datetime.now(pytz.timezone(timezone_name)).date(), target.prayer_method or 3)
+        context.user_data.pop("awaiting_target_location", None)
+        timings = await fetch_prayer_times(city_name, datetime.now(pytz.timezone(timezone_name)).date(), target.prayer_method or 3, lat, lon)
         saved = tr(lang, "community_city_saved").replace("{target}", target.chat_title or target.chat_id).replace("{city}", city_name).replace("{timezone}", timezone_name)
         if timings:
             await update.message.reply_text(
@@ -981,8 +1105,7 @@ async def select_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_target_picker(query, context, lang)
         return
     if not target.city:
-        context.user_data["awaiting_target_city"] = True
-        await query.edit_message_text(text=tr(lang, "community_city_prompt"), reply_markup=community_connect_menu(lang))
+        await begin_community_location_setup(query, context, lang)
         return
     await render_community_menu(query, context, lang, target)
 
@@ -1031,8 +1154,7 @@ async def change_community_city(update: Update, context: ContextTypes.DEFAULT_TY
     if not context.user_data.get("selected_target_id"):
         await show_target_picker(query, context, get_lang(context))
         return
-    context.user_data["awaiting_target_city"] = True
-    await query.edit_message_text(text=tr(get_lang(context), "community_city_prompt"), reply_markup=community_connect_menu(get_lang(context)))
+    await begin_community_location_setup(query, context, get_lang(context))
 
 
 def format_community_prayer_times(lang: str, target, timings: dict) -> str:
@@ -1066,6 +1188,142 @@ async def show_community_prayer_times(update: Update, context: ContextTypes.DEFA
         await query.edit_message_text(text=tr(lang, "community_prayer_failed"), reply_markup=community_menu(lang, target))
         return
     await query.edit_message_text(text=format_community_prayer_times(lang, target, timings), reply_markup=community_menu(lang, target))
+
+
+async def render_community_posts(query, context: ContextTypes.DEFAULT_TYPE, lang: str, *, notice: str | None = None):
+    if not query.from_user:
+        return
+    target = await get_target(str(query.from_user.id), context.user_data.get("selected_target_id", ""))
+    if not target:
+        await show_target_picker(query, context, lang)
+        return
+    posts = await list_community_posts(str(query.from_user.id), target.chat_id)
+    text_value = notice or tr(lang, "community_other_posts")
+    if not posts:
+        text_value = f"{text_value}\n\n{tr(lang, 'post_none')}"
+    await query.edit_message_text(text=text_value, reply_markup=community_posts_menu(lang, posts))
+
+
+async def open_community_posts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await render_community_posts(query, context, get_lang(context))
+
+
+async def begin_community_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(context)
+    if not query.from_user:
+        return
+    target = await get_target(str(query.from_user.id), context.user_data.get("selected_target_id", ""))
+    if not target:
+        await show_target_picker(query, context, lang)
+        return
+    kind = query.data.removeprefix("community_post_add_")
+    if kind == "personal":
+        prefs = await get_user_prefs(str(query.from_user.id))
+        if not prefs or not parse_selected(prefs.selected_athkar):
+            await query.edit_message_text(text=tr(lang, "post_personal_missing"), reply_markup=community_menu(lang, target))
+            return
+        context.user_data["draft_community_post"] = {"content_type": "personal_athkar"}
+        await query.edit_message_text(text=tr(lang, "post_schedule_title"), reply_markup=post_schedule_menu(lang))
+        return
+    if kind == "text":
+        context.user_data["draft_community_post"] = {"content_type": "text"}
+        context.user_data["awaiting_community_post_text"] = True
+        await query.edit_message_text(text=tr(lang, "post_prompt_message"), reply_markup=community_menu(lang, target))
+        return
+    if kind == "photo":
+        context.user_data["draft_community_post"] = {"content_type": "photo"}
+        context.user_data["awaiting_community_post_photo"] = True
+        await query.edit_message_text(text=tr(lang, "post_prompt_image"), reply_markup=community_menu(lang, target))
+
+
+async def handle_community_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.photo or not update.effective_user:
+        return
+    if not context.user_data.get("awaiting_community_post_photo"):
+        return
+    draft = context.user_data.get("draft_community_post")
+    if not draft:
+        return
+    draft["photo_file_id"] = update.message.photo[-1].file_id
+    draft["caption"] = update.message.caption or None
+    context.user_data.pop("awaiting_community_post_photo", None)
+    await update.message.reply_text(tr(get_lang(context), "post_schedule_title"), reply_markup=post_schedule_menu(get_lang(context)))
+
+
+async def choose_community_post_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(context)
+    if not context.user_data.get("draft_community_post"):
+        await render_community_posts(query, context, lang)
+        return
+    choice = query.data.removeprefix("community_post_schedule_")
+    if choice == "clock":
+        context.user_data["awaiting_community_post_clock"] = True
+        await query.edit_message_text(text=tr(lang, "post_prompt_clock"), reply_markup=post_schedule_menu(lang))
+    elif choice == "interval":
+        context.user_data["awaiting_community_post_interval"] = True
+        await query.edit_message_text(text=tr(lang, "post_prompt_interval"), reply_markup=post_schedule_menu(lang))
+    elif choice == "prayer":
+        await query.edit_message_text(text=tr(lang, "post_schedule_title"), reply_markup=post_prayer_anchor_menu(lang))
+
+
+async def save_community_post(update: Update, context: ContextTypes.DEFAULT_TYPE, *, schedule_type: str, time_of_day: str | None = None, prayer_name: str | None = None, interval_minutes: int | None = None):
+    user_id = str(update.effective_user.id)
+    target = await get_target(user_id, context.user_data.get("selected_target_id", ""))
+    draft = context.user_data.get("draft_community_post")
+    if not target or not draft:
+        return None
+    post = await create_community_post(
+        user_id, target.chat_id, content_type=draft["content_type"],
+        text_content=draft.get("text_content"), photo_file_id=draft.get("photo_file_id"), caption=draft.get("caption"),
+        schedule_type=schedule_type, time_of_day=time_of_day, prayer_name=prayer_name, interval_minutes=interval_minutes,
+    )
+    context.user_data.pop("draft_community_post", None)
+    context.user_data.pop("awaiting_community_post_text", None)
+    context.user_data.pop("awaiting_community_post_clock", None)
+    context.user_data.pop("awaiting_community_post_interval", None)
+    return post
+
+
+async def set_community_post_anchor(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    prayer_name = query.data.removeprefix("community_post_anchor_")
+    if prayer_name not in {"Fajr", "Dhuhr", "Asr", "Maghrib", "Isha"}:
+        return
+    post = await save_community_post(update, context, schedule_type="prayer", prayer_name=prayer_name)
+    if not post:
+        return
+    await render_community_posts(query, context, get_lang(context), notice=tr(get_lang(context), "post_saved"))
+
+
+async def delete_community_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not query.from_user:
+        return
+    try:
+        post_id = int(query.data.removeprefix("community_post_delete_"))
+    except ValueError:
+        return
+    await remove_community_post(str(query.from_user.id), post_id)
+    await render_community_posts(query, context, get_lang(context))
+
+
+async def community_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    for key in (
+        "draft_community_post", "awaiting_community_post_text", "awaiting_community_post_photo",
+        "awaiting_community_post_clock", "awaiting_community_post_interval",
+    ):
+        context.user_data.pop(key, None)
+    await render_community_menu(query, context, get_lang(context))
 
 
 async def auto_register_target(update: Update, context: ContextTypes.DEFAULT_TYPE):

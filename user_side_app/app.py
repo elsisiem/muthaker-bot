@@ -2,6 +2,7 @@ import logging
 
 from aiohttp import web
 from telegram.ext import Application, CallbackQueryHandler, ChatMemberHandler, CommandHandler, MessageHandler, filters
+from telegram.error import BadRequest
 
 from .config import TOKEN
 from .db import init_db
@@ -41,6 +42,13 @@ from .handlers import (
     toggle_community_post,
     toggle_prayer,
     change_community_city,
+    choose_community_post_schedule,
+    community_back,
+    begin_community_post,
+    delete_community_post,
+    handle_community_photo,
+    open_community_posts,
+    set_community_post_anchor,
     show_community_prayer_times,
     begin_timezone_setup,
     version,
@@ -53,6 +61,9 @@ application = Application.builder().token(TOKEN).build()
 
 
 async def log_error(update, context):
+    if isinstance(context.error, BadRequest) and "Message is not modified" in str(context.error):
+        logger.debug("Ignored no-op Telegram message edit")
+        return
     logger.error("Unhandled bot update error", exc_info=context.error)
 
 application.add_handler(CommandHandler("start", start))
@@ -94,8 +105,15 @@ application.add_handler(CallbackQueryHandler(select_target, pattern="^target_sel
 application.add_handler(CallbackQueryHandler(toggle_community_post, pattern="^community_toggle_"))
 application.add_handler(CallbackQueryHandler(change_community_city, pattern="^community_change_city$"))
 application.add_handler(CallbackQueryHandler(show_community_prayer_times, pattern="^community_prayer_times$"))
+application.add_handler(CallbackQueryHandler(open_community_posts, pattern="^community_posts$"))
+application.add_handler(CallbackQueryHandler(begin_community_post, pattern="^community_post_add_"))
+application.add_handler(CallbackQueryHandler(choose_community_post_schedule, pattern="^community_post_schedule_"))
+application.add_handler(CallbackQueryHandler(set_community_post_anchor, pattern="^community_post_anchor_"))
+application.add_handler(CallbackQueryHandler(delete_community_post, pattern="^community_post_delete_"))
+application.add_handler(CallbackQueryHandler(community_back, pattern="^community_back$"))
 application.add_handler(MessageHandler(filters.StatusUpdate.CHAT_SHARED, handle_chat_shared))
 application.add_handler(MessageHandler(filters.LOCATION, handle_location_input))
+application.add_handler(MessageHandler(filters.PHOTO, handle_community_photo))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_input))
 application.add_error_handler(log_error)
 

@@ -60,6 +60,28 @@ class PostingTarget(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class CommunityPost(Base):
+    """A user-created recurring post for one linked group or channel."""
+    __tablename__ = "community_posts"
+
+    id = Column(Integer, primary_key=True)
+    owner_telegram_id = Column(String, index=True, nullable=False)
+    target_chat_id = Column(String, index=True, nullable=False)
+    content_type = Column(String, nullable=False)  # text, photo, personal_athkar
+    text_content = Column(Text, nullable=True)
+    photo_file_id = Column(String, nullable=True)
+    caption = Column(Text, nullable=True)
+    schedule_type = Column(String, nullable=False)  # clock, prayer, interval
+    time_of_day = Column(String, nullable=True)  # HH:MM in the target timezone
+    prayer_name = Column(String, nullable=True)
+    prayer_offset_minutes = Column(Integer, default=0)
+    interval_minutes = Column(Integer, nullable=True)
+    last_sent_key = Column(String, nullable=True)
+    last_sent_at = Column(DateTime, nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -268,6 +290,87 @@ async def list_schedulable_targets() -> list[PostingTarget]:
             )
         )
         return list(result.scalars().all())
+
+
+async def create_community_post(
+    owner_telegram_id: str,
+    target_chat_id: str,
+    *,
+    content_type: str,
+    text_content: str | None = None,
+    photo_file_id: str | None = None,
+    caption: str | None = None,
+    schedule_type: str,
+    time_of_day: str | None = None,
+    prayer_name: str | None = None,
+    prayer_offset_minutes: int = 0,
+    interval_minutes: int | None = None,
+) -> CommunityPost:
+    async with async_session() as session:
+        row = CommunityPost(
+            owner_telegram_id=owner_telegram_id,
+            target_chat_id=target_chat_id,
+            content_type=content_type,
+            text_content=text_content,
+            photo_file_id=photo_file_id,
+            caption=caption,
+            schedule_type=schedule_type,
+            time_of_day=time_of_day,
+            prayer_name=prayer_name,
+            prayer_offset_minutes=prayer_offset_minutes,
+            interval_minutes=interval_minutes,
+        )
+        session.add(row)
+        await session.commit()
+        await session.refresh(row)
+        return row
+
+
+async def list_community_posts(owner_telegram_id: str, target_chat_id: str) -> list[CommunityPost]:
+    async with async_session() as session:
+        result = await session.execute(
+            select(CommunityPost).where(
+                CommunityPost.owner_telegram_id == owner_telegram_id,
+                CommunityPost.target_chat_id == target_chat_id,
+                CommunityPost.is_active == True,
+            ).order_by(CommunityPost.created_at.desc())
+        )
+        return list(result.scalars().all())
+
+
+async def list_active_community_posts() -> list[CommunityPost]:
+    async with async_session() as session:
+        result = await session.execute(select(CommunityPost).where(CommunityPost.is_active == True))
+        return list(result.scalars().all())
+
+
+async def mark_community_post_sent(post_id: int, *, sent_key: str | None = None, sent_at: datetime | None = None) -> None:
+    async with async_session() as session:
+        result = await session.execute(select(CommunityPost).where(CommunityPost.id == post_id))
+        row = result.scalars().first()
+        if not row:
+            return
+        if sent_key is not None:
+            row.last_sent_key = sent_key
+        if sent_at is not None:
+            row.last_sent_at = sent_at
+        await session.commit()
+
+
+async def remove_community_post(owner_telegram_id: str, post_id: int) -> bool:
+    async with async_session() as session:
+        result = await session.execute(
+            select(CommunityPost).where(
+                CommunityPost.id == post_id,
+                CommunityPost.owner_telegram_id == owner_telegram_id,
+            )
+        )
+        row = result.scalars().first()
+        if not row:
+            return False
+        row.is_active = False
+        await session.commit()
+        return True
 
 
 async def remove_target(owner_telegram_id: str, chat_id: str):

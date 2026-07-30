@@ -77,7 +77,7 @@ def community_connect_menu(lang: str) -> InlineKeyboardMarkup:
 
 def community_menu(lang: str, target) -> InlineKeyboardMarkup:
     def state(enabled: bool) -> str:
-        return "✅" if enabled else "⬜"
+        return "✓" if enabled else "○"
 
     rows = [
         [
@@ -92,6 +92,7 @@ def community_menu(lang: str, target) -> InlineKeyboardMarkup:
             InlineKeyboardButton(tr(lang, "community_prayer_times"), callback_data="community_prayer_times"),
             InlineKeyboardButton(tr(lang, "community_change_city"), callback_data="community_change_city"),
         ],
+        [InlineKeyboardButton(tr(lang, "community_other_posts"), callback_data="community_posts")],
         [InlineKeyboardButton(tr(lang, "send_test"), callback_data="targets_test")],
         [
             InlineKeyboardButton(tr(lang, "manage_targets"), callback_data="targets_manage"),
@@ -193,7 +194,7 @@ def setup_complete_menu(lang: str) -> InlineKeyboardMarkup:
 
 def target_picker_menu(lang: str, targets) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(f"{'📣' if target.chat_type == 'channel' else '👥'} {target.chat_title or target.chat_id}", callback_data=f"target_select_{target.chat_id}")]
+        [InlineKeyboardButton(target.chat_title or target.chat_id, callback_data=f"target_select_{target.chat_id}")]
         for target in targets
     ]
     rows.append([
@@ -204,6 +205,51 @@ def target_picker_menu(lang: str, targets) -> InlineKeyboardMarkup:
     rows.append([InlineKeyboardButton(tr(lang, "refresh_targets"), callback_data="targets_refresh")])
     rows.extend(settings_footer(lang, "mode_community"))
     return InlineKeyboardMarkup(rows)
+
+
+def community_posts_menu(lang: str, posts) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for post in posts:
+        if post.content_type == "photo":
+            label = tr(lang, "post_photo")
+        elif post.content_type == "personal_athkar":
+            label = tr(lang, "post_personal_athkar")
+        else:
+            label = (post.text_content or tr(lang, "post_message"))[:28]
+        rows.append([InlineKeyboardButton(f"{tr(lang, 'delete')} {label}", callback_data=f"community_post_delete_{post.id}")])
+    rows.extend([
+        [
+            InlineKeyboardButton(tr(lang, "post_add_message"), callback_data="community_post_add_text"),
+            InlineKeyboardButton(tr(lang, "post_add_image"), callback_data="community_post_add_photo"),
+        ],
+        [InlineKeyboardButton(tr(lang, "post_add_personal_athkar"), callback_data="community_post_add_personal")],
+        [InlineKeyboardButton(tr(lang, "back"), callback_data="community_back")],
+    ])
+    return InlineKeyboardMarkup(rows)
+
+
+def post_schedule_menu(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(tr(lang, "post_schedule_clock"), callback_data="community_post_schedule_clock")],
+        [InlineKeyboardButton(tr(lang, "post_schedule_prayer"), callback_data="community_post_schedule_prayer")],
+        [InlineKeyboardButton(tr(lang, "post_schedule_interval"), callback_data="community_post_schedule_interval")],
+        [InlineKeyboardButton(tr(lang, "back"), callback_data="community_back")],
+    ])
+
+
+def post_prayer_anchor_menu(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(tr(lang, "prayer_fajr"), callback_data="community_post_anchor_Fajr"),
+            InlineKeyboardButton(tr(lang, "prayer_dhuhr"), callback_data="community_post_anchor_Dhuhr"),
+        ],
+        [
+            InlineKeyboardButton(tr(lang, "prayer_asr"), callback_data="community_post_anchor_Asr"),
+            InlineKeyboardButton(tr(lang, "prayer_maghrib"), callback_data="community_post_anchor_Maghrib"),
+        ],
+        [InlineKeyboardButton(tr(lang, "prayer_isha"), callback_data="community_post_anchor_Isha")],
+        [InlineKeyboardButton(tr(lang, "back"), callback_data="community_posts")],
+    ])
 
 
 def target_request_keyboard(lang: str, mode: str) -> ReplyKeyboardMarkup:
