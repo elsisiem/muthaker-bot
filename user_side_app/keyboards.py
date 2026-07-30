@@ -1,4 +1,7 @@
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
+from telegram import (
+    InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton,
+    KeyboardButtonRequestChat, ReplyKeyboardMarkup,
+)
 
 from .i18n import tr
 
@@ -22,6 +25,7 @@ def persistent_language_row(lang: str) -> list[InlineKeyboardButton]:
 
 def settings_footer(lang: str, back_callback: str) -> list[list[InlineKeyboardButton]]:
     return [[
+        InlineKeyboardButton(tr(lang, "cfg_timezone"), callback_data="cfg_personal_timezone"),
         InlineKeyboardButton(tr(lang, "lang_button"), callback_data="open_lang_menu"),
         InlineKeyboardButton(tr(lang, "back"), callback_data=back_callback),
     ]]
@@ -65,6 +69,7 @@ def group_menu(lang: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(tr(lang, "cfg_athkar"), callback_data="cfg_group_athkar")],
         [InlineKeyboardButton(tr(lang, "cfg_schedule"), callback_data="cfg_group_schedule")],
         [InlineKeyboardButton(tr(lang, "send_test"), callback_data="targets_test")],
+        [InlineKeyboardButton(tr(lang, "refresh_targets"), callback_data="targets_refresh")],
         *settings_footer(lang, "home"),
     ])
 
@@ -75,6 +80,7 @@ def channel_menu(lang: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(tr(lang, "cfg_athkar"), callback_data="cfg_channel_athkar")],
         [InlineKeyboardButton(tr(lang, "cfg_schedule"), callback_data="cfg_channel_schedule")],
         [InlineKeyboardButton(tr(lang, "send_test"), callback_data="targets_test")],
+        [InlineKeyboardButton(tr(lang, "refresh_targets"), callback_data="targets_refresh")],
         *settings_footer(lang, "home"),
     ])
 
@@ -165,8 +171,23 @@ def target_picker_menu(lang: str, targets) -> InlineKeyboardMarkup:
         for target in targets
     ]
     rows.append([InlineKeyboardButton(tr(lang, "send_test"), callback_data="targets_test")])
+    rows.append([InlineKeyboardButton(tr(lang, "refresh_targets"), callback_data="targets_refresh")])
     rows.append([InlineKeyboardButton(tr(lang, "close"), callback_data="close_home")])
     return InlineKeyboardMarkup(rows)
+
+
+def target_request_keyboard(lang: str, mode: str) -> ReplyKeyboardMarkup:
+    is_channel = mode == "channel"
+    request = KeyboardButtonRequestChat(
+        request_id=1 if is_channel else 2,
+        chat_is_channel=is_channel,
+        bot_is_member=True,
+    )
+    return ReplyKeyboardMarkup(
+        [[KeyboardButton(tr(lang, "choose_channel" if is_channel else "choose_group"), request_chat=request)]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
 
 
 def location_request_keyboard(lang: str) -> ReplyKeyboardMarkup:

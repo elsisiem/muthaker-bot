@@ -25,7 +25,9 @@ from .handlers import (
     open_quiet_hours_menu,
     open_schedule_menu,
     remove_target_callback,
+    request_target_discovery,
     select_target,
+    handle_chat_shared,
     save_athkar,
     send_test_to_targets,
     select_all_athkar,
@@ -79,9 +81,11 @@ application.add_handler(CallbackQueryHandler(set_quiet_hours, pattern="^quiet_(n
 application.add_handler(CallbackQueryHandler(show_personal_settings, pattern="^cfg_personal_show$"))
 application.add_handler(CallbackQueryHandler(manage_targets, pattern="^targets_manage_group$|^targets_manage_channel$|^targets_manage$"))
 application.add_handler(CallbackQueryHandler(send_test_to_targets, pattern="^targets_test$"))
+application.add_handler(CallbackQueryHandler(request_target_discovery, pattern="^targets_refresh$"))
 application.add_handler(CallbackQueryHandler(remove_target_callback, pattern="^target_remove_"))
 application.add_handler(CallbackQueryHandler(select_target, pattern="^target_select_"))
 application.add_handler(CallbackQueryHandler(config_placeholder, pattern="^cfg_"))
+application.add_handler(MessageHandler(filters.StatusUpdate.CHAT_SHARED, handle_chat_shared))
 application.add_handler(MessageHandler(filters.LOCATION, handle_location_input))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_input))
 application.add_error_handler(log_error)
