@@ -1,4 +1,24 @@
-# Muthaker Bot 🤖
+# Muthaker Bot
+
+Telegram athkar reminders for individuals, groups, and channels.
+
+## Personal reminders
+
+- Choose individual athkar and receive them on an interval, or spread a daily goal across awake hours.
+- Select a quiet-hours preset (normal, early sleeper, night owl, or none). Reminders pause during that window.
+- Set a timezone by sharing a Telegram location or typing a city. The bot stores only the detected timezone; coordinates are never persisted and the location message is deleted when Telegram permits it.
+- Enable morning and evening athkar images, scheduled from Fajr and Asr. The city is requested separately for prayer-time calculation; the default is 30 minutes after each prayer and can be edited later.
+- Arabic, English, Spanish, French, and Turkish interface selection is available from every main menu.
+
+## Groups and channels
+
+The existing channel publisher remains active. Add the bot as an administrator, then use `/link` inside the target group/channel to connect it to the owner’s setup. Its existing prayer-based athkar, Quran, and fasting content continues to use the channel service unchanged.
+
+## Deployment
+
+Set `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, and `DATABASE_URL` in Heroku, then deploy the `master` branch. The `Procfile` launches `main.py`, which runs both the existing channel service and the modular personal-reminder application.
+
+---
 **Personalized Islamic Reminders - Quran & Athkar**
 
 A two-sided Telegram bot system running on Heroku that combines:

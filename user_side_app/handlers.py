@@ -1,5 +1,6 @@
 import json
 import logging
+from pathlib import Path
 from datetime import datetime, timedelta
 
 import aiohttp
@@ -29,6 +30,7 @@ from .keyboards import (
     language_menu,
     location_request_keyboard,
     personal_menu,
+    quiet_hours_menu,
     remove_target_menu,
     schedule_menu,
 )
@@ -42,6 +44,7 @@ from .scheduler import (
 logger = logging.getLogger(__name__)
 UI_BUILD = "user-side-v180"
 CAIRO_TZ = pytz.timezone("Africa/Cairo")
+QUIET_HOUR_PRESETS = {"normal": (23, 6), "early": (21, 5), "night_owl": (1, 9), "none": (0, 0)}
 
 ATHKAR_OPTIONS = [
     {"id": "hizb", "ar": "ورد الحرز", "en": "Hizb Wird", "text_ar": "لا إله إلا الله وحده لا شريك له، له الملك وله الحمد وهو على كل شيء قدير.", "text_en": "There is no god but Allah alone with no partner."},
@@ -333,6 +336,34 @@ async def open_delivery_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.edit_message_text(text=tr(lang, "delivery_menu_title"), reply_markup=delivery_menu(lang))
 
 
+async def open_quiet_hours_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(context)
+    await query.edit_message_text(text=tr(lang, "quiet_hours_title"), reply_markup=quiet_hours_menu(lang))
+
+
+async def set_quiet_hours(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    preset = query.data.removeprefix("quiet_")
+    if preset not in QUIET_HOUR_PRESETS:
+        return
+    start, end = QUIET_HOUR_PRESETS[preset]
+    await update_user_settings(str(query.from_user.id), quiet_hours_preset=preset, quiet_start_hour=start, quiet_end_hour=end)
+    await rebuild_user_schedule(context)
+    await query.edit_message_text(text=tr(get_lang(context), "saved"), reply_markup=personal_menu(get_lang(context)))
+
+
+async def begin_timezone_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(context)
+    context.user_data["awaiting_timezone_setup"] = True
+    await query.edit_message_text(text=f"{tr(lang, 'timezone_title')}\n\n{tr(lang, 'prayer_prompt_help')}\n\n{tr(lang, 'prayer_prompt_privacy')}", reply_markup=personal_menu(lang))
+    await context.bot.send_message(chat_id=query.from_user.id, text=tr(lang, "prayer_prompt_help"), reply_markup=location_request_keyboard(lang))
+
+
 async def set_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -421,7 +452,7 @@ async def city_to_coords(city: str):
 async def handle_location_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.location or not update.effective_user:
         return
-    if not context.user_data.get("awaiting_prayer_setup"):
+    if not (context.user_data.get("awaiting_prayer_setup") or context.user_data.get("awaiting_timezone_setup")):
         return
 
     lang = get_lang(context)
@@ -430,7 +461,6 @@ async def handle_location_input(update: Update, context: ContextTypes.DEFAULT_TY
     longitude = update.message.location.longitude
 
     timezone_name = await resolve_timezone_from_coords(latitude, longitude)
-    city = await resolve_city_label_from_coords(latitude, longitude)
 
     try:
         await update.message.delete()
@@ -442,22 +472,17 @@ async def handle_location_input(update: Update, context: ContextTypes.DEFAULT_TY
         await context.bot.send_message(chat_id=update.effective_chat.id, text=tr(lang, "prayer_location_failed"))
         return
 
-    if not city:
-        city = "Unknown"
-
-    await update_user_settings(
-        user_id,
-        prayer_athkar_enabled=True,
-        prayer_city=city,
-        timezone=timezone_name,
-    )
-    context.user_data["awaiting_prayer_setup"] = False
+    prayer_setup = context.user_data.pop("awaiting_prayer_setup", False)
+    context.user_data.pop("awaiting_timezone_setup", None)
+    # Coordinates are deliberately not persisted; location is used only to infer timezone.
+    await update_user_settings(user_id, timezone=timezone_name)
     await rebuild_user_schedule(context)
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text=f"{tr(lang, 'prayer_enabled_done')}\n{tr(lang, 'prayer_timezone_detected').replace('{timezone}', timezone_name)}\n{tr(lang, 'prayer_city_saved').replace('{city}', city)}",
-        reply_markup=ReplyKeyboardRemove(),
-    )
+    if prayer_setup:
+        context.user_data["awaiting_prayer_setup"] = True
+        text_value = f"{tr(lang, 'prayer_timezone_detected').replace('{timezone}', timezone_name)}\n\n{tr(lang, 'prayer_prompt_city')}"
+    else:
+        text_value = tr(lang, 'prayer_timezone_detected').replace('{timezone}', timezone_name)
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=text_value, reply_markup=ReplyKeyboardRemove())
 
 
 async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -496,6 +521,18 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(tr(lang, "saved"))
         return
 
+    if context.user_data.get("awaiting_timezone_setup"):
+        lat, lon, _ = await city_to_coords(text_value)
+        timezone_name = await resolve_timezone_from_coords(lat, lon) if lat is not None else None
+        if not timezone_name:
+            await update.message.reply_text(tr(lang, "prayer_city_failed"))
+            return
+        context.user_data.pop("awaiting_timezone_setup", None)
+        await update_user_settings(user_id, timezone=timezone_name)
+        await rebuild_user_schedule(context)
+        await update.message.reply_text(tr(lang, 'prayer_timezone_detected').replace('{timezone}', timezone_name), reply_markup=ReplyKeyboardRemove())
+        return
+
     if context.user_data.get("awaiting_prayer_setup"):
         lat, lon, display = await city_to_coords(text_value)
         if lat is None or lon is None:
@@ -524,6 +561,8 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def send_user_reminder(telegram_id: str):
     prefs = await get_user_prefs(telegram_id)
     if not prefs:
+        return
+    if is_quiet_time(prefs):
         return
     selected = parse_selected(prefs.selected_athkar)
     if not selected:
@@ -570,15 +609,35 @@ def parse_prayer_datetime(day, prayer_name: str, timings: dict, timezone_name: s
 async def send_prayer_message(telegram_id: str, kind: str):
     if not bot_application:
         return
+    filename = "أذكار_الصباح.jpg" if kind == "morning" else "أذكار_المساء.jpg"
+    image_path = Path(__file__).resolve().parent.parent / "الأذكار" / filename
+    if image_path.exists():
+        with image_path.open("rb") as image:
+            await bot_application.bot.send_photo(chat_id=int(telegram_id), photo=image)
+        return
     text = "🌅 أذكار الصباح" if kind == "morning" else "🌙 أذكار المساء"
     await bot_application.bot.send_message(chat_id=int(telegram_id), text=text)
+
+
+def is_quiet_time(user) -> bool:
+    """Evaluate the user's saved quiet hours in their own timezone."""
+    if user.quiet_hours_preset == "none":
+        return False
+    try:
+        local_now = datetime.now(pytz.timezone(user.timezone or "Africa/Cairo"))
+    except Exception:
+        local_now = datetime.now(CAIRO_TZ)
+    start, end, hour = user.quiet_start_hour or 23, user.quiet_end_hour or 6, local_now.hour
+    return start <= hour < end if start < end else hour >= start or hour < end
 
 
 async def build_jobs_for_user(user):
     selected = parse_selected(user.selected_athkar)
     if selected:
         if user.frequency == "goal_per_day" and user.daily_goal_count and user.daily_goal_count > 0:
-            seconds = max(60, int(round(86400 / user.daily_goal_count)))
+            start, end = user.quiet_start_hour or 23, user.quiet_end_hour or 6
+            awake_seconds = 86400 if user.quiet_hours_preset == "none" else (24 - ((end - start) % 24)) * 3600
+            seconds = max(60, int(round(awake_seconds / user.daily_goal_count)))
         else:
             seconds = frequency_to_seconds(user.frequency or "every_30_min", user.custom_frequency_minutes)
         reminder_scheduler.add_job(
@@ -592,7 +651,7 @@ async def build_jobs_for_user(user):
         )
 
     if user.prayer_athkar_enabled and user.prayer_city:
-        now = datetime.now(CAIRO_TZ)
+        now = datetime.now(pytz.timezone(user.timezone or "Africa/Cairo"))
         for day in (now.date(), now.date() + timedelta(days=1)):
             timings = await fetch_prayer_times_by_city(user.prayer_city, day)
             if not timings:

@@ -19,6 +19,7 @@ from .handlers import (
     open_delivery_menu,
     open_language_menu,
     open_personal_athkar,
+    open_quiet_hours_menu,
     open_schedule_menu,
     remove_target_callback,
     save_athkar,
@@ -26,11 +27,13 @@ from .handlers import (
     select_all_athkar,
     set_delivery,
     set_language,
+    set_quiet_hours,
     set_schedule,
     start,
     show_personal_settings,
     toggle_athkar,
     toggle_prayer,
+    begin_timezone_setup,
     version,
 )
 from .scheduler import start_user_reminder_scheduler, stop_user_reminder_scheduler
@@ -59,6 +62,9 @@ application.add_handler(CallbackQueryHandler(set_schedule, pattern="^schedule_")
 application.add_handler(CallbackQueryHandler(open_delivery_menu, pattern="^cfg_personal_delivery$"))
 application.add_handler(CallbackQueryHandler(set_delivery, pattern="^delivery_(rotating|batch)$"))
 application.add_handler(CallbackQueryHandler(toggle_prayer, pattern="^cfg_personal_prayer$"))
+application.add_handler(CallbackQueryHandler(open_quiet_hours_menu, pattern="^cfg_personal_quiet$"))
+application.add_handler(CallbackQueryHandler(begin_timezone_setup, pattern="^cfg_personal_timezone$"))
+application.add_handler(CallbackQueryHandler(set_quiet_hours, pattern="^quiet_(normal|early|night_owl|none)$"))
 application.add_handler(CallbackQueryHandler(show_personal_settings, pattern="^cfg_personal_show$"))
 application.add_handler(CallbackQueryHandler(manage_targets, pattern="^targets_manage_group$|^targets_manage_channel$|^targets_manage$"))
 application.add_handler(CallbackQueryHandler(send_test_to_targets, pattern="^targets_test$"))

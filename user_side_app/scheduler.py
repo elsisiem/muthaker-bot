@@ -27,6 +27,19 @@ async def start_user_reminder_scheduler():
         logger.info("User reminder scheduler active")
 
 
+def schedule_daily_rebuild(rebuilder):
+    """Refresh one-off prayer jobs each day without duplicating the job."""
+    reminder_scheduler.add_job(
+        rebuilder,
+        trigger="cron",
+        hour=0,
+        minute=5,
+        id="daily_prayer_rebuild",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+
+
 def clear_jobs(prefixes: tuple[str, ...] = ("user_reminder_", "prayer_reminder_")):
     for job in reminder_scheduler.get_jobs():
         if any(job.id.startswith(p) for p in prefixes):
