@@ -46,6 +46,10 @@ logger = logging.getLogger(__name__)
 
 application = Application.builder().token(TOKEN).build()
 
+
+async def log_error(update, context):
+    logger.error("Unhandled bot update error", exc_info=context.error)
+
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CommandHandler("link", link_target))
 application.add_handler(CommandHandler("version", version))
@@ -80,6 +84,7 @@ application.add_handler(CallbackQueryHandler(select_target, pattern="^target_sel
 application.add_handler(CallbackQueryHandler(config_placeholder, pattern="^cfg_"))
 application.add_handler(MessageHandler(filters.LOCATION, handle_location_input))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_input))
+application.add_error_handler(log_error)
 
 
 async def handle_root(request):

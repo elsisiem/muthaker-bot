@@ -39,8 +39,9 @@ from .scheduler import (
     reminder_scheduler,
     rebuild_all_jobs,
     set_application,
-    bot_application,
+    get_application,
 )
+from services.timezone_service import detect_timezone_from_location
 
 logger = logging.getLogger(__name__)
 UI_BUILD = "user-side-v180"
@@ -133,19 +134,14 @@ async def go_home(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def close_to_home(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Clear a completed setup screen and return to the concise start menu."""
+    """Close a completed setup screen without leaving stale bot messages behind."""
     query = update.callback_query
     await query.answer()
     context.user_data.clear()
-    lang = "ar"
-    if query.from_user:
-        prefs = await get_user_prefs(str(query.from_user.id))
-        lang = normalize_lang(prefs.language if prefs else None, "ar")
     try:
         await query.delete_message()
     except BadRequest:
         pass
-    await context.bot.send_message(chat_id=query.from_user.id, text=f"{tr(lang, 'welcome')}\n\n{tr(lang, 'choose_mode')}", reply_markup=home_menu(lang))
 
 
 async def version(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -171,6 +167,11 @@ async def set_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def resolve_timezone_from_coords(latitude: float, longitude: float):
+    # This local lookup is immediate and avoids leaving the user waiting on a web API.
+    timezone_name = detect_timezone_from_location(latitude, longitude)
+    if timezone_name:
+        return timezone_name
+
     open_meteo_url = "https://api.open-meteo.com/v1/forecast"
     open_meteo_params = {
         "latitude": latitude,
@@ -404,8 +405,10 @@ async def begin_timezone_setup(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer()
     lang = get_lang(context)
     context.user_data["awaiting_timezone_setup"] = True
+    context.user_data["timezone_main_message_id"] = query.message.message_id
     await query.edit_message_text(text=f"{tr(lang, 'timezone_title')}\n\n{tr(lang, 'prayer_prompt_help')}\n\n{tr(lang, 'prayer_prompt_privacy')}", reply_markup=personal_menu(lang))
-    await context.bot.send_message(chat_id=query.from_user.id, text=tr(lang, "prayer_prompt_help"), reply_markup=location_request_keyboard(lang))
+    location_prompt = await context.bot.send_message(chat_id=query.from_user.id, text=tr(lang, "share_location_now"), reply_markup=location_request_keyboard(lang))
+    context.user_data["timezone_location_prompt_id"] = location_prompt.message_id
 
 
 async def set_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -470,15 +473,17 @@ async def toggle_prayer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     context.user_data["awaiting_prayer_setup"] = True
+    context.user_data["timezone_main_message_id"] = query.message.message_id
     await query.edit_message_text(
         text=f"{tr(lang, 'prayer_prompt_title')}\n\n{tr(lang, 'prayer_prompt_help')}\n\n{tr(lang, 'prayer_prompt_privacy')}\n\n{tr(lang, 'prayer_prompt_city')}",
         reply_markup=personal_menu(lang),
     )
-    await context.bot.send_message(
+    location_prompt = await context.bot.send_message(
         chat_id=query.from_user.id,
         text=f"{tr(lang, 'prayer_prompt_title')}\n\n{tr(lang, 'prayer_prompt_help')}",
         reply_markup=location_request_keyboard(lang),
     )
+    context.user_data["timezone_location_prompt_id"] = location_prompt.message_id
 
 
 async def city_to_coords(city: str):
@@ -509,14 +514,8 @@ async def handle_location_input(update: Update, context: ContextTypes.DEFAULT_TY
 
     timezone_name = await resolve_timezone_from_coords(latitude, longitude)
 
-    try:
-        await update.message.delete()
-        await context.bot.send_message(chat_id=update.effective_chat.id, text=tr(lang, "location_deleted"), reply_markup=ReplyKeyboardRemove())
-    except Exception:
-        pass
-
     if not timezone_name:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text=tr(lang, "prayer_location_failed"))
+        await update.message.reply_text(tr(lang, "prayer_location_failed"), reply_markup=ReplyKeyboardRemove())
         return
 
     prayer_setup = context.user_data.pop("awaiting_prayer_setup", False)
@@ -527,9 +526,32 @@ async def handle_location_input(update: Update, context: ContextTypes.DEFAULT_TY
     if prayer_setup:
         context.user_data["awaiting_prayer_setup"] = True
         text_value = f"{tr(lang, 'prayer_timezone_detected').replace('{timezone}', timezone_name)}\n\n{tr(lang, 'prayer_prompt_city')}"
+        reply_markup = personal_menu(lang)
     else:
-        text_value = tr(lang, 'prayer_timezone_detected').replace('{timezone}', timezone_name)
-    await context.bot.send_message(chat_id=update.effective_chat.id, text=text_value, reply_markup=ReplyKeyboardRemove())
+        text_value = f"{tr(lang, 'prayer_timezone_detected').replace('{timezone}', timezone_name)}\n\n{tr(lang, 'timezone_saved_continue')}"
+        reply_markup = home_menu(lang)
+
+    main_message_id = context.user_data.pop("timezone_main_message_id", None)
+    prompt_message_id = context.user_data.pop("timezone_location_prompt_id", None)
+    try:
+        await update.message.delete()
+        if prompt_message_id:
+            await context.bot.delete_message(update.effective_chat.id, prompt_message_id)
+    except Exception:
+        logger.debug("Could not delete timezone setup messages", exc_info=True)
+
+    if main_message_id:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=main_message_id,
+                text=text_value,
+                reply_markup=reply_markup,
+            )
+            return
+        except BadRequest:
+            logger.warning("Could not update timezone setup message", exc_info=True)
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=text_value, reply_markup=reply_markup)
 
 
 async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -628,12 +650,17 @@ async def send_user_reminder(telegram_id: str):
         ids = [selected[idx]]
         rotation_state[telegram_id] = (idx + 1) % len(selected)
 
+    application = get_application()
+    if not application:
+        logger.error("Cannot send user reminder: Telegram application is not ready")
+        return
+
     for athkar_id in ids:
         item = find_athkar(athkar_id)
-        if not item or not bot_application:
+        if not item:
             continue
         text_key = "text_en" if lang == "en" else "text_ar"
-        await bot_application.bot.send_message(chat_id=int(telegram_id), text=item[text_key])
+        await application.bot.send_message(chat_id=int(telegram_id), text=item[text_key])
 
 
 async def fetch_prayer_times_by_city(city: str, target_date):
@@ -660,16 +687,18 @@ def parse_prayer_datetime(day, prayer_name: str, timings: dict, timezone_name: s
 
 
 async def send_prayer_message(telegram_id: str, kind: str):
-    if not bot_application:
+    application = get_application()
+    if not application:
+        logger.error("Cannot send prayer athkar: Telegram application is not ready")
         return
     filename = "أذكار_الصباح.jpg" if kind == "morning" else "أذكار_المساء.jpg"
     image_path = Path(__file__).resolve().parent.parent / "الأذكار" / filename
     if image_path.exists():
         with image_path.open("rb") as image:
-            await bot_application.bot.send_photo(chat_id=int(telegram_id), photo=image)
+            await application.bot.send_photo(chat_id=int(telegram_id), photo=image)
         return
     text = "🌅 أذكار الصباح" if kind == "morning" else "🌙 أذكار المساء"
-    await bot_application.bot.send_message(chat_id=int(telegram_id), text=text)
+    await application.bot.send_message(chat_id=int(telegram_id), text=text)
 
 
 def is_quiet_time(user) -> bool:
