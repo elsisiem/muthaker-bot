@@ -45,6 +45,17 @@ class PostingTarget(Base):
     chat_id = Column(String, index=True)
     chat_title = Column(String, nullable=True)
     chat_type = Column(String, nullable=True)
+    city = Column(String, nullable=True)
+    timezone = Column(String, default="Africa/Cairo")
+    prayer_method = Column(Integer, default=3)
+    morning_athkar_enabled = Column(Boolean, default=True)
+    night_athkar_enabled = Column(Boolean, default=True)
+    monday_fasting_enabled = Column(Boolean, default=True)
+    thursday_fasting_enabled = Column(Boolean, default=True)
+    last_morning_sent_date = Column(String, nullable=True)
+    last_night_sent_date = Column(String, nullable=True)
+    last_monday_sent_date = Column(String, nullable=True)
+    last_thursday_sent_date = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -66,6 +77,17 @@ async def init_db():
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS quiet_end_hour INTEGER DEFAULT 6"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS onboarding_complete BOOLEAN DEFAULT FALSE"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS timezone_confirmed BOOLEAN DEFAULT FALSE"))
+        await conn.execute(text("ALTER TABLE posting_targets ADD COLUMN IF NOT EXISTS city VARCHAR"))
+        await conn.execute(text("ALTER TABLE posting_targets ADD COLUMN IF NOT EXISTS timezone VARCHAR DEFAULT 'Africa/Cairo'"))
+        await conn.execute(text("ALTER TABLE posting_targets ADD COLUMN IF NOT EXISTS prayer_method INTEGER DEFAULT 3"))
+        await conn.execute(text("ALTER TABLE posting_targets ADD COLUMN IF NOT EXISTS morning_athkar_enabled BOOLEAN DEFAULT TRUE"))
+        await conn.execute(text("ALTER TABLE posting_targets ADD COLUMN IF NOT EXISTS night_athkar_enabled BOOLEAN DEFAULT TRUE"))
+        await conn.execute(text("ALTER TABLE posting_targets ADD COLUMN IF NOT EXISTS monday_fasting_enabled BOOLEAN DEFAULT TRUE"))
+        await conn.execute(text("ALTER TABLE posting_targets ADD COLUMN IF NOT EXISTS thursday_fasting_enabled BOOLEAN DEFAULT TRUE"))
+        await conn.execute(text("ALTER TABLE posting_targets ADD COLUMN IF NOT EXISTS last_morning_sent_date VARCHAR"))
+        await conn.execute(text("ALTER TABLE posting_targets ADD COLUMN IF NOT EXISTS last_night_sent_date VARCHAR"))
+        await conn.execute(text("ALTER TABLE posting_targets ADD COLUMN IF NOT EXISTS last_monday_sent_date VARCHAR"))
+        await conn.execute(text("ALTER TABLE posting_targets ADD COLUMN IF NOT EXISTS last_thursday_sent_date VARCHAR"))
 
 
 async def get_user_prefs(telegram_id: str) -> UserPreferences | None:
@@ -196,6 +218,55 @@ async def list_targets(owner_telegram_id: str, chat_type: str | None = None) -> 
         elif chat_type:
             statement = statement.where(PostingTarget.chat_type == chat_type)
         result = await session.execute(statement.order_by(PostingTarget.created_at.desc()))
+        return list(result.scalars().all())
+
+
+async def get_target(owner_telegram_id: str, chat_id: str) -> PostingTarget | None:
+    async with async_session() as session:
+        result = await session.execute(
+            select(PostingTarget).where(
+                PostingTarget.owner_telegram_id == owner_telegram_id,
+                PostingTarget.chat_id == chat_id,
+                PostingTarget.is_active == True,
+            )
+        )
+        return result.scalars().first()
+
+
+async def update_target_settings(owner_telegram_id: str, chat_id: str, **settings) -> PostingTarget | None:
+    """Persist the settings for one linked group or channel only."""
+    allowed = {
+        "city", "timezone", "prayer_method", "morning_athkar_enabled",
+        "night_athkar_enabled", "monday_fasting_enabled", "thursday_fasting_enabled",
+        "last_morning_sent_date", "last_night_sent_date", "last_monday_sent_date",
+        "last_thursday_sent_date",
+    }
+    async with async_session() as session:
+        result = await session.execute(
+            select(PostingTarget).where(
+                PostingTarget.owner_telegram_id == owner_telegram_id,
+                PostingTarget.chat_id == chat_id,
+            )
+        )
+        row = result.scalars().first()
+        if not row:
+            return None
+        for key, value in settings.items():
+            if key in allowed:
+                setattr(row, key, value)
+        await session.commit()
+        return row
+
+
+async def list_schedulable_targets() -> list[PostingTarget]:
+    """Targets with a configured city are ready for the community dispatcher."""
+    async with async_session() as session:
+        result = await session.execute(
+            select(PostingTarget).where(
+                PostingTarget.is_active == True,
+                PostingTarget.city.is_not(None),
+            )
+        )
         return list(result.scalars().all())
 
 

@@ -642,6 +642,83 @@ TEXTS: dict[str, dict[str, str]] = {
     },
 }
 
+# Community posting is a single product for groups and channels.  These are kept
+# together so every visible action has a translation in each supported language.
+_COMMUNITY_TEXTS: dict[str, dict[str, str]] = {
+    "ar": {
+        "mode_community": "👥📣 مجموعاتي وقنواتي",
+        "add_group": "➕ إضافة مجموعة",
+        "add_channel": "➕ إضافة قناة",
+        "community_title": "إعدادات {target}",
+        "community_intro": "اختر ما تريد نشره في {target}. تُرسل الأذكار بعد مواقيت الصلاة في مدينة الجهة.",
+        "community_morning": "🌅 أذكار الصباح",
+        "community_night": "🌙 أذكار المساء",
+        "community_monday": "🍃 صيام الإثنين",
+        "community_thursday": "🍃 صيام الخميس",
+        "community_prayer_times": "🕌 عرض المواقيت",
+        "community_change_city": "📍 ضبط المدينة",
+        "community_city_prompt": "اكتب اسم المدينة التي تُقام فيها هذه المجموعة أو القناة. سنستخدمها لمواقيت الصلاة فقط.",
+        "community_city_saved": "تم ضبط مدينة {target} على: {city}\nالمنطقة الزمنية: {timezone}",
+        "community_city_failed": "تعذّر التعرّف على هذه المدينة. اكتب اسم المدينة بشكل أوضح، مثل: الرياض أو Cairo.",
+        "community_prayer_title": "مواقيت الصلاة في {city} — {date}",
+        "community_prayer_missing_city": "اضبط مدينة الجهة أولاً حتى نحسب المواقيت بدقة.",
+        "community_prayer_failed": "تعذّر جلب مواقيت الصلاة الآن. حاول مرة أخرى بعد قليل.",
+        "community_saved": "تم الحفظ. سيعمل النشر وفق الاختيارات الظاهرة بعلامة ✅.",
+        "community_test_text": "📬 هذه رسالة تجريبية من مُذكِّر الأذكار. إعدادات النشر لهذه الجهة تعمل.",
+        "target_setup_community": "أضف البوت مشرفاً في مجموعتك أو قناتك، ثم اخترها من الزر أدناه. لا نصل إلى أي جهة إلا التي تختارها بنفسك.",
+    },
+    "en": {
+        "mode_community": "👥📣 My groups & channels", "add_group": "➕ Add group", "add_channel": "➕ Add channel",
+        "community_title": "Settings for {target}", "community_intro": "Choose what to post in {target}. Prayer-timed posts use this community's city.",
+        "community_morning": "🌅 Morning Athkar", "community_night": "🌙 Evening Athkar", "community_monday": "🍃 Monday fasting", "community_thursday": "🍃 Thursday fasting",
+        "community_prayer_times": "🕌 View prayer times", "community_change_city": "📍 Set city",
+        "community_city_prompt": "Type the city where this group or channel is based. We use it only for prayer times.",
+        "community_city_saved": "{target} is set to: {city}\nTime zone: {timezone}", "community_city_failed": "We could not recognise that city. Try a clearer name, such as Riyadh or Cairo.",
+        "community_prayer_title": "Prayer times in {city} — {date}", "community_prayer_missing_city": "Set this community's city first so prayer times are accurate.",
+        "community_prayer_failed": "Prayer times could not be fetched right now. Please try again shortly.", "community_saved": "Saved. Items marked ✅ will be posted.",
+        "community_test_text": "📬 This is a test message from Muthaker. Posting is working for this community.",
+        "target_setup_community": "Make the bot an admin in your group or channel, then choose it below. We only access the community you choose.",
+    },
+    "es": {
+        "mode_community": "👥📣 Mis grupos y canales", "add_group": "➕ Añadir grupo", "add_channel": "➕ Añadir canal",
+        "community_title": "Ajustes de {target}", "community_intro": "Elige qué publicar en {target}. Los horarios usan la ciudad de esta comunidad.",
+        "community_morning": "🌅 Adhkar matutino", "community_night": "🌙 Adhkar nocturno", "community_monday": "🍃 Ayuno del lunes", "community_thursday": "🍃 Ayuno del jueves",
+        "community_prayer_times": "🕌 Ver horarios", "community_change_city": "📍 Configurar ciudad",
+        "community_city_prompt": "Escribe la ciudad de este grupo o canal. Solo la usamos para los horarios de oración.",
+        "community_city_saved": "{target} se configuró en: {city}\nZona horaria: {timezone}", "community_city_failed": "No pudimos reconocer la ciudad. Prueba con un nombre más claro.",
+        "community_prayer_title": "Horarios de oración en {city} — {date}", "community_prayer_missing_city": "Configura primero la ciudad de la comunidad.",
+        "community_prayer_failed": "No se pudieron obtener los horarios ahora. Inténtalo de nuevo pronto.", "community_saved": "Guardado. Se publicarán los elementos con ✅.",
+        "community_test_text": "📬 Mensaje de prueba de Muthaker. La publicación funciona para esta comunidad.",
+        "target_setup_community": "Haz al bot administrador del grupo o canal y selecciónalo abajo.",
+    },
+    "fr": {
+        "mode_community": "👥📣 Mes groupes et canaux", "add_group": "➕ Ajouter un groupe", "add_channel": "➕ Ajouter un canal",
+        "community_title": "Réglages de {target}", "community_intro": "Choisissez quoi publier dans {target}. Les horaires suivent la ville de cette communauté.",
+        "community_morning": "🌅 Adhkâr du matin", "community_night": "🌙 Adhkâr du soir", "community_monday": "🍃 Jeûne du lundi", "community_thursday": "🍃 Jeûne du jeudi",
+        "community_prayer_times": "🕌 Voir les horaires", "community_change_city": "📍 Définir la ville",
+        "community_city_prompt": "Saisissez la ville de ce groupe ou canal. Elle sert uniquement aux horaires de prière.",
+        "community_city_saved": "{target} est réglé sur : {city}\nFuseau horaire : {timezone}", "community_city_failed": "Ville introuvable. Essayez un nom plus précis.",
+        "community_prayer_title": "Horaires de prière à {city} — {date}", "community_prayer_missing_city": "Définissez d'abord la ville de cette communauté.",
+        "community_prayer_failed": "Impossible de récupérer les horaires maintenant. Réessayez bientôt.", "community_saved": "Enregistré. Les éléments marqués ✅ seront publiés.",
+        "community_test_text": "📬 Message de test de Muthaker. La publication fonctionne pour cette communauté.",
+        "target_setup_community": "Ajoutez le bot comme administrateur du groupe ou canal, puis choisissez-le ci-dessous.",
+    },
+    "tr": {
+        "mode_community": "👥📣 Gruplarım ve kanallarım", "add_group": "➕ Grup ekle", "add_channel": "➕ Kanal ekle",
+        "community_title": "{target} ayarları", "community_intro": "{target} için ne paylaşılacağını seçin. Namaz vakitleri bu topluluğun şehrine göre kullanılır.",
+        "community_morning": "🌅 Sabah zikri", "community_night": "🌙 Akşam zikri", "community_monday": "🍃 Pazartesi orucu", "community_thursday": "🍃 Perşembe orucu",
+        "community_prayer_times": "🕌 Vakitleri gör", "community_change_city": "📍 Şehri ayarla",
+        "community_city_prompt": "Bu grubun veya kanalın şehrini yazın. Bunu yalnızca namaz vakitleri için kullanırız.",
+        "community_city_saved": "{target} şuna ayarlandı: {city}\nSaat dilimi: {timezone}", "community_city_failed": "Şehir tanınamadı. Daha açık bir ad deneyin.",
+        "community_prayer_title": "{city} namaz vakitleri — {date}", "community_prayer_missing_city": "Önce bu topluluğun şehrini ayarlayın.",
+        "community_prayer_failed": "Namaz vakitleri şu anda alınamadı. Lütfen biraz sonra tekrar deneyin.", "community_saved": "Kaydedildi. ✅ işaretli öğeler yayınlanacak.",
+        "community_test_text": "📬 Muthaker deneme mesajı. Bu topluluk için paylaşım çalışıyor.",
+        "target_setup_community": "Botu grubunuzda veya kanalınızda yönetici yapın, sonra aşağıdan seçin.",
+    },
+}
+for _lang, _values in _COMMUNITY_TEXTS.items():
+    TEXTS[_lang].update(_values)
+
 
 def normalize_lang(lang: str | None, fallback: str = DEFAULT_LANG) -> str:
     if lang in TEXTS:

@@ -34,8 +34,7 @@ def settings_footer(lang: str, back_callback: str) -> list[list[InlineKeyboardBu
 def home_menu(lang: str) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(tr(lang, "mode_personal"), callback_data="mode_personal")],
-        [InlineKeyboardButton(tr(lang, "mode_group"), callback_data="mode_group")],
-        [InlineKeyboardButton(tr(lang, "mode_channel"), callback_data="mode_channel")],
+        [InlineKeyboardButton(tr(lang, "mode_community"), callback_data="mode_community")],
         [
             InlineKeyboardButton(tr(lang, "cfg_timezone"), callback_data="cfg_personal_timezone"),
             InlineKeyboardButton(tr(lang, "lang_button"), callback_data="open_lang_menu"),
@@ -63,26 +62,53 @@ def personal_menu(lang: str) -> InlineKeyboardMarkup:
     ])
 
 
-def group_menu(lang: str) -> InlineKeyboardMarkup:
+def community_connect_menu(lang: str) -> InlineKeyboardMarkup:
+    """Native Telegram pickers must be requested separately for groups and channels."""
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(tr(lang, "cfg_targets"), callback_data="targets_manage_group")],
-        [InlineKeyboardButton(tr(lang, "cfg_athkar"), callback_data="cfg_group_athkar")],
-        [InlineKeyboardButton(tr(lang, "cfg_schedule"), callback_data="cfg_group_schedule")],
-        [InlineKeyboardButton(tr(lang, "send_test"), callback_data="targets_test")],
+        [
+            InlineKeyboardButton(tr(lang, "add_group"), callback_data="targets_refresh_group"),
+            InlineKeyboardButton(tr(lang, "add_channel"), callback_data="targets_refresh_channel"),
+        ],
+        [InlineKeyboardButton(tr(lang, "manage_targets"), callback_data="targets_manage")],
         [InlineKeyboardButton(tr(lang, "refresh_targets"), callback_data="targets_refresh")],
         *settings_footer(lang, "home"),
     ])
+
+
+def community_menu(lang: str, target) -> InlineKeyboardMarkup:
+    def state(enabled: bool) -> str:
+        return "✅" if enabled else "⬜"
+
+    rows = [
+        [
+            InlineKeyboardButton(f"{state(target.morning_athkar_enabled)} {tr(lang, 'community_morning')}", callback_data="community_toggle_morning"),
+            InlineKeyboardButton(f"{state(target.night_athkar_enabled)} {tr(lang, 'community_night')}", callback_data="community_toggle_night"),
+        ],
+        [
+            InlineKeyboardButton(f"{state(target.monday_fasting_enabled)} {tr(lang, 'community_monday')}", callback_data="community_toggle_monday"),
+            InlineKeyboardButton(f"{state(target.thursday_fasting_enabled)} {tr(lang, 'community_thursday')}", callback_data="community_toggle_thursday"),
+        ],
+        [
+            InlineKeyboardButton(tr(lang, "community_prayer_times"), callback_data="community_prayer_times"),
+            InlineKeyboardButton(tr(lang, "community_change_city"), callback_data="community_change_city"),
+        ],
+        [InlineKeyboardButton(tr(lang, "send_test"), callback_data="targets_test")],
+        [
+            InlineKeyboardButton(tr(lang, "manage_targets"), callback_data="targets_manage"),
+            InlineKeyboardButton(tr(lang, "refresh_targets"), callback_data="targets_refresh"),
+        ],
+        *settings_footer(lang, "mode_community"),
+    ]
+    return InlineKeyboardMarkup(rows)
+
+
+# Kept as compatibility shims for already-open Telegram messages from earlier releases.
+def group_menu(lang: str) -> InlineKeyboardMarkup:
+    return community_connect_menu(lang)
 
 
 def channel_menu(lang: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(tr(lang, "cfg_targets"), callback_data="targets_manage_channel")],
-        [InlineKeyboardButton(tr(lang, "cfg_athkar"), callback_data="cfg_channel_athkar")],
-        [InlineKeyboardButton(tr(lang, "cfg_schedule"), callback_data="cfg_channel_schedule")],
-        [InlineKeyboardButton(tr(lang, "send_test"), callback_data="targets_test")],
-        [InlineKeyboardButton(tr(lang, "refresh_targets"), callback_data="targets_refresh")],
-        *settings_footer(lang, "home"),
-    ])
+    return community_connect_menu(lang)
 
 
 def remove_target_menu(lang: str, targets: list[tuple[str, str]]) -> InlineKeyboardMarkup:
@@ -170,9 +196,13 @@ def target_picker_menu(lang: str, targets) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(f"{'📣' if target.chat_type == 'channel' else '👥'} {target.chat_title or target.chat_id}", callback_data=f"target_select_{target.chat_id}")]
         for target in targets
     ]
-    rows.append([InlineKeyboardButton(tr(lang, "send_test"), callback_data="targets_test")])
+    rows.append([
+        InlineKeyboardButton(tr(lang, "add_group"), callback_data="targets_refresh_group"),
+        InlineKeyboardButton(tr(lang, "add_channel"), callback_data="targets_refresh_channel"),
+    ])
+    rows.append([InlineKeyboardButton(tr(lang, "manage_targets"), callback_data="targets_manage")])
     rows.append([InlineKeyboardButton(tr(lang, "refresh_targets"), callback_data="targets_refresh")])
-    rows.append([InlineKeyboardButton(tr(lang, "close"), callback_data="close_home")])
+    rows.extend(settings_footer(lang, "mode_community"))
     return InlineKeyboardMarkup(rows)
 
 
