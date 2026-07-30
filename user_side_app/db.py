@@ -23,6 +23,7 @@ class UserPreferences(Base):
     frequency = Column(String, default="every_30_min")
     custom_frequency_minutes = Column(Integer, nullable=True)
     daily_goal_count = Column(Integer, nullable=True)
+    daily_goal_per_athkar = Column(Text, nullable=True)
     delivery_mode = Column(String, default="rotating")
     prayer_athkar_enabled = Column(Boolean, default=False)
     prayer_city = Column(String, nullable=True)
@@ -30,6 +31,8 @@ class UserPreferences(Base):
     quiet_hours_preset = Column(String, default="normal")
     quiet_start_hour = Column(Integer, default=23)
     quiet_end_hour = Column(Integer, default=6)
+    quiet_start_minute = Column(Integer, default=0)
+    quiet_end_minute = Column(Integer, default=0)
     onboarding_complete = Column(Boolean, default=False)
     timezone_confirmed = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
@@ -90,6 +93,7 @@ async def init_db():
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS frequency VARCHAR DEFAULT 'every_30_min'"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS custom_frequency_minutes INTEGER"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS daily_goal_count INTEGER"))
+        await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS daily_goal_per_athkar TEXT"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS delivery_mode VARCHAR DEFAULT 'rotating'"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS prayer_athkar_enabled BOOLEAN DEFAULT FALSE"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS prayer_city VARCHAR"))
@@ -97,6 +101,8 @@ async def init_db():
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS quiet_hours_preset VARCHAR DEFAULT 'normal'"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS quiet_start_hour INTEGER DEFAULT 23"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS quiet_end_hour INTEGER DEFAULT 6"))
+        await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS quiet_start_minute INTEGER DEFAULT 0"))
+        await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS quiet_end_minute INTEGER DEFAULT 0"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS onboarding_complete BOOLEAN DEFAULT FALSE"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS timezone_confirmed BOOLEAN DEFAULT FALSE"))
         await conn.execute(text("ALTER TABLE posting_targets ADD COLUMN IF NOT EXISTS city VARCHAR"))
@@ -149,6 +155,7 @@ async def update_user_settings(
     frequency: str | None = None,
     custom_frequency_minutes: int | None = None,
     daily_goal_count: int | None = None,
+    daily_goal_per_athkar: str | None = None,
     delivery_mode: str | None = None,
     prayer_athkar_enabled: bool | None = None,
     prayer_city: str | None = None,
@@ -156,6 +163,8 @@ async def update_user_settings(
     quiet_hours_preset: str | None = None,
     quiet_start_hour: int | None = None,
     quiet_end_hour: int | None = None,
+    quiet_start_minute: int | None = None,
+    quiet_end_minute: int | None = None,
     onboarding_complete: bool | None = None,
     timezone_confirmed: bool | None = None,
 ):
@@ -173,6 +182,8 @@ async def update_user_settings(
             row.custom_frequency_minutes = custom_frequency_minutes
         if daily_goal_count is not None or frequency == "goal_per_day":
             row.daily_goal_count = daily_goal_count
+        if daily_goal_per_athkar is not None or frequency == "goal_per_athkar":
+            row.daily_goal_per_athkar = daily_goal_per_athkar
         if delivery_mode is not None:
             row.delivery_mode = delivery_mode
         if prayer_athkar_enabled is not None:
@@ -187,6 +198,10 @@ async def update_user_settings(
             row.quiet_start_hour = quiet_start_hour
         if quiet_end_hour is not None:
             row.quiet_end_hour = quiet_end_hour
+        if quiet_start_minute is not None:
+            row.quiet_start_minute = quiet_start_minute
+        if quiet_end_minute is not None:
+            row.quiet_end_minute = quiet_end_minute
         if onboarding_complete is not None:
             row.onboarding_complete = onboarding_complete
         if timezone_confirmed is not None:

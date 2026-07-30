@@ -27,11 +27,13 @@ from .db import (
 from .i18n import normalize_lang, tr
 from .keyboards import (
     athkar_select_menu,
+    advanced_goal_menu,
     community_connect_menu,
     community_menu,
     community_posts_menu,
     delivery_menu,
     goal_menu,
+    goal_scope_menu,
     home_menu,
     interval_menu,
     language_menu,
@@ -56,18 +58,24 @@ from .community_dispatcher import fetch_prayer_times
 from services.timezone_service import detect_timezone_from_location
 
 logger = logging.getLogger(__name__)
-UI_BUILD = "user-side-v180"
+UI_BUILD = "user-side-v200"
 CAIRO_TZ = pytz.timezone("Africa/Cairo")
 QUIET_HOUR_PRESETS = {"normal": (23, 6), "early": (21, 5), "night_owl": (1, 9), "none": (0, 0)}
 
 ATHKAR_OPTIONS = [
-    {"id": "hizb", "ar": "ورد الحرز", "en": "Hizb Wird", "text_ar": "لا إله إلا الله وحده لا شريك له، له الملك وله الحمد وهو على كل شيء قدير.", "text_en": "There is no god but Allah alone with no partner."},
-    {"id": "baaqiyat", "ar": "الباقيات الصالحات", "en": "Eternal Good Deeds", "text_ar": "سبحان الله، والحمد لله، ولا إله إلا الله، والله أكبر.", "text_en": "Glory be to Allah, praise be to Allah, there is no god but Allah, and Allah is the Greatest."},
+    {"id": "hizb", "ar": "الحرز", "en": "Protection", "text_ar": "حسبي الله لا إله إلا هو، عليه توكلت وهو رب العرش العظيم.", "text_en": "Allah is sufficient for me; there is no god but Him."},
+    {"id": "hamd", "ar": "الحمد", "en": "Praise", "text_ar": "الحمد لله رب العالمين.", "text_en": "Praise be to Allah, Lord of the worlds."},
+    {"id": "hawqala", "ar": "الحوقلة", "en": "Hawqala", "text_ar": "لا حول ولا قوة إلا بالله.", "text_en": "There is no power nor strength except through Allah."},
+    {"id": "tahlil", "ar": "التهليل", "en": "Tahlil", "text_ar": "لا إله إلا الله وحده لا شريك له، له الملك وله الحمد وهو على كل شيء قدير.", "text_en": "There is no god but Allah alone, with no partner."},
     {"id": "istighfar", "ar": "الاستغفار", "en": "Istighfar", "text_ar": "أستغفر الله العظيم وأتوب إليه.", "text_en": "I seek forgiveness from Allah and repent to Him."},
     {"id": "salat", "ar": "الصلاة على النبي", "en": "Salawat", "text_ar": "اللهم صل وسلم وبارك على محمد.", "text_en": "O Allah, send prayers and peace upon Muhammad."},
+    {"id": "tasbih", "ar": "التسبيح", "en": "Tasbih", "text_ar": "سبحان الله وبحمده، سبحان الله العظيم.", "text_en": "Glory be to Allah and praise be to Him; glory be to Allah the Most Great."},
+    {"id": "baaqiyat", "ar": "الباقيات الصالحات", "en": "Lasting good deeds", "text_ar": "سبحان الله، والحمد لله، ولا إله إلا الله، والله أكبر.", "text_en": "Glory be to Allah, praise be to Allah, there is no god but Allah, and Allah is the Greatest."},
+    {"id": "yunus", "ar": "دعاء ذي النون", "en": "Dua of Dhu al-Nun", "text_ar": "لا إله إلا أنت سبحانك إني كنت من الظالمين.", "text_en": "There is no god but You. Glory be to You; I was among the wrongdoers."},
 ]
 
 rotation_state: dict[str, int] = {}
+quiet_timing_cache: dict[tuple[str, str], dict | None] = {}
 
 
 def get_lang(context: ContextTypes.DEFAULT_TYPE, fallback: str = "ar") -> str:
@@ -140,7 +148,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_or_edit(update, context, tr(lang, "onboarding_language_title"), language_menu(lang, show_back=False))
         return
 
-    text_value = f"{tr(lang, 'welcome')}\n\n{tr(lang, 'choose_mode')}\n\n({UI_BUILD})"
+    text_value = f"{tr(lang, 'welcome')}\n\n{tr(lang, 'choose_mode')}"
     await send_or_edit(update, context, text_value, home_menu(lang))
 
 
@@ -149,7 +157,7 @@ async def go_home(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     lang = get_lang(context)
     await query.edit_message_text(
-        text=f"{tr(lang, 'welcome')}\n\n{tr(lang, 'choose_mode')}\n\n({UI_BUILD})",
+        text=f"{tr(lang, 'welcome')}\n\n{tr(lang, 'choose_mode')}",
         reply_markup=home_menu(lang),
     )
 
@@ -187,9 +195,9 @@ async def set_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get("onboarding"):
         context.user_data.pop("onboarding", None)
         await update_user_settings(str(query.from_user.id), onboarding_complete=True)
-        await query.edit_message_text(text=f"{tr(lang, 'language_saved')}\n\n{tr(lang, 'choose_mode')}", reply_markup=home_menu(lang))
+        await query.edit_message_text(text=f"{tr(lang, 'welcome')}\n\n{tr(lang, 'choose_mode')}", reply_markup=home_menu(lang))
         return
-    await query.edit_message_text(text=f"{tr(lang, 'lang_set')}\n\n{tr(lang, 'choose_mode')}", reply_markup=home_menu(lang))
+    await query.edit_message_text(text=f"{tr(lang, 'welcome')}\n\n{tr(lang, 'choose_mode')}", reply_markup=home_menu(lang))
 
 
 async def present_timezone_setup(query, context: ContextTypes.DEFAULT_TYPE, lang: str):
@@ -289,11 +297,6 @@ async def begin_personal_setup(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     await query.answer()
     context.user_data["setup_flow"] = True
-    prefs = await get_user_prefs(str(query.from_user.id))
-    if not prefs or not prefs.timezone_confirmed:
-        context.user_data["resume_after_timezone"] = "personal_setup"
-        await present_timezone_setup(query, context, get_lang(context))
-        return
     await open_personal_athkar(update, context)
 
 
@@ -355,6 +358,13 @@ async def save_athkar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text=tr(lang, "need_athkar"), reply_markup=athkar_select_menu(lang, items))
         return
     await update_user_settings(user_id, selected_athkar=json.dumps(selected))
+    prefs = await get_user_prefs(user_id)
+    # Time zone is only needed once the user starts arranging actual sends.
+    # Letting Step 1 work without it keeps first-run setup light and focused.
+    if context.user_data.get("setup_flow") and not (prefs and prefs.timezone_confirmed):
+        context.user_data["resume_after_timezone"] = "personal_schedule"
+        await present_timezone_setup(query, context, lang)
+        return
     await rebuild_user_schedule(context)
     if context.user_data.get("setup_flow"):
         await query.edit_message_text(text=tr(lang, "setup_step_schedule"), reply_markup=schedule_menu(lang))
@@ -380,25 +390,12 @@ async def set_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if query.data == "schedule_strategy_goal":
-        await query.edit_message_text(text=tr(lang, "goal_menu_title"), reply_markup=goal_menu(lang))
+        await query.edit_message_text(text=tr(lang, "goal_menu_title"), reply_markup=goal_scope_menu(lang))
         return
 
     if query.data == "schedule_custom":
         context.user_data["awaiting_custom_interval"] = True
         await query.edit_message_text(text=tr(lang, "prompt_custom_interval"), reply_markup=interval_menu(lang))
-        return
-
-    if query.data == "schedule_goal_custom":
-        context.user_data["awaiting_custom_goal"] = True
-        await query.edit_message_text(text=tr(lang, "prompt_custom_goal"), reply_markup=goal_menu(lang))
-        return
-
-    if query.data.startswith("schedule_goal_"):
-        raw = query.data.replace("schedule_goal_", "")
-        goal_value = int(raw)
-        await update_user_settings(user_id, frequency="goal_per_day", daily_goal_count=goal_value, custom_frequency_minutes=None)
-        await rebuild_user_schedule(context)
-        await continue_after_schedule(query, context, lang)
         return
 
     mapping = {
@@ -408,6 +405,100 @@ async def set_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
     frequency = mapping.get(query.data, "every_30_min")
     await update_user_settings(user_id, frequency=frequency, custom_frequency_minutes=None, daily_goal_count=None)
+    await rebuild_user_schedule(context)
+    await continue_after_schedule(query, context, lang)
+
+
+async def choose_goal_scope(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(context)
+    scope = query.data.removeprefix("goal_scope_")
+    if scope == "total":
+        await query.edit_message_text(text=tr(lang, "goal_scope_total_title"), reply_markup=goal_menu(lang, "total"))
+        return
+    if scope == "each":
+        await query.edit_message_text(text=tr(lang, "goal_scope_each_title"), reply_markup=goal_menu(lang, "each"))
+        return
+    if scope == "advanced":
+        prefs = await get_user_prefs(str(query.from_user.id))
+        selected = parse_selected(prefs.selected_athkar if prefs else None)
+        if not selected:
+            await query.edit_message_text(text=tr(lang, "need_athkar"), reply_markup=athkar_select_menu(lang, []))
+            return
+        context.user_data["advanced_goal_ids"] = selected
+        context.user_data["advanced_goal_values"] = {}
+        context.user_data["advanced_goal_index"] = 0
+        await render_advanced_goal(query, context, lang)
+
+
+async def render_advanced_goal(query, context: ContextTypes.DEFAULT_TYPE, lang: str):
+    selected = context.user_data.get("advanced_goal_ids", [])
+    index = context.user_data.get("advanced_goal_index", 0)
+    if index >= len(selected):
+        values = context.user_data.get("advanced_goal_values", {})
+        await finish_goal_setup(query, context, lang, "advanced", values)
+        return
+    athkar = find_athkar(selected[index])
+    name = athkar["ar" if lang == "ar" else "en"] if athkar else selected[index]
+    text_value = tr(lang, "advanced_goal_title").replace("{name}", name).replace("{position}", str(index + 1)).replace("{total}", str(len(selected)))
+    await query.edit_message_text(text=text_value, reply_markup=advanced_goal_menu(lang))
+
+
+async def set_goal_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(context)
+    raw = query.data.removeprefix("goal_")
+    scope, value = raw.split("_", 1)
+    if value == "custom":
+        context.user_data["awaiting_custom_goal_scope"] = scope
+        await query.edit_message_text(text=tr(lang, "prompt_custom_goal"), reply_markup=goal_menu(lang, scope))
+        return
+    await finish_goal_setup(query, context, lang, scope, int(value))
+
+
+async def set_advanced_goal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    raw = query.data.removeprefix("goal_adv_")
+    lang = get_lang(context)
+    if raw == "custom":
+        context.user_data["awaiting_advanced_goal"] = True
+        await query.edit_message_text(text=tr(lang, "prompt_custom_goal"), reply_markup=advanced_goal_menu(lang))
+        return
+    await apply_advanced_goal_value(query, context, lang, int(raw))
+
+
+async def apply_advanced_goal_value(query, context: ContextTypes.DEFAULT_TYPE, lang: str, value: int):
+    selected = context.user_data.get("advanced_goal_ids", [])
+    index = context.user_data.get("advanced_goal_index", 0)
+    if index >= len(selected):
+        return
+    context.user_data.setdefault("advanced_goal_values", {})[selected[index]] = value
+    context.user_data["advanced_goal_index"] = index + 1
+    await render_advanced_goal(query, context, lang)
+
+
+async def finish_goal_setup(query, context: ContextTypes.DEFAULT_TYPE, lang: str, scope: str, value):
+    user_id = str(query.from_user.id)
+    selected = context.user_data.get("draft_selected")
+    if selected is None:
+        prefs = await get_user_prefs(user_id)
+        selected = parse_selected(prefs.selected_athkar if prefs else None)
+    if scope == "total":
+        await update_user_settings(
+            user_id, frequency="goal_per_day", daily_goal_count=int(value), daily_goal_per_athkar="{}",
+            custom_frequency_minutes=None,
+        )
+    else:
+        per_athkar = value if isinstance(value, dict) else {athkar_id: int(value) for athkar_id in selected}
+        await update_user_settings(
+            user_id, frequency="goal_per_athkar", daily_goal_count=sum(per_athkar.values()),
+            daily_goal_per_athkar=json.dumps(per_athkar), custom_frequency_minutes=None,
+        )
+    for key in ("advanced_goal_ids", "advanced_goal_values", "advanced_goal_index"):
+        context.user_data.pop(key, None)
     await rebuild_user_schedule(context)
     await continue_after_schedule(query, context, lang)
 
@@ -437,34 +528,52 @@ async def set_quiet_hours(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     preset = query.data.removeprefix("quiet_")
-    if preset not in QUIET_HOUR_PRESETS:
+    if preset == "custom":
+        context.user_data["awaiting_custom_quiet_hours"] = True
+        await query.edit_message_text(text=tr(get_lang(context), "quiet_custom_prompt"), reply_markup=quiet_hours_menu(get_lang(context)))
         return
-    start, end = QUIET_HOUR_PRESETS[preset]
-    await update_user_settings(str(query.from_user.id), quiet_hours_preset=preset, quiet_start_hour=start, quiet_end_hour=end)
+    dynamic = {
+        "fajr_isha": (0, 0), "sleep_10_fajr": (22, 5),
+        "sleep_11_fajr": (23, 5), "sleep_12_fajr": (0, 5),
+    }
+    if preset not in QUIET_HOUR_PRESETS and preset not in dynamic:
+        return
+    prefs = await get_user_prefs(str(query.from_user.id))
+    if preset in dynamic and not (prefs and prefs.prayer_city):
+        context.user_data["pending_quiet_preset"] = preset
+        await query.edit_message_text(text=tr(get_lang(context), "quiet_city_prompt"), reply_markup=quiet_hours_menu(get_lang(context)))
+        return
+    start, end = dynamic.get(preset, QUIET_HOUR_PRESETS.get(preset, (23, 6)))
+    await update_user_settings(str(query.from_user.id), quiet_hours_preset=preset, quiet_start_hour=start, quiet_end_hour=end, quiet_start_minute=0, quiet_end_minute=0)
     await rebuild_user_schedule(context)
     lang = get_lang(context)
     if context.user_data.pop("setup_flow", False):
         prefs = await get_user_prefs(str(query.from_user.id))
-        selected = parse_selected(prefs.selected_athkar if prefs else None)
-        names = "، ".join(selected_names(selected, lang)) or tr(lang, "empty_athkar")
-        schedule = {
-            "every_5_min": tr(lang, "interval_5"),
-            "every_30_min": tr(lang, "interval_30"),
-            "hourly": tr(lang, "interval_60"),
-            "goal_per_day": tr(lang, "daily_goal_summary").replace("{count}", str(prefs.daily_goal_count or 100)),
-            "custom_interval": tr(lang, "custom_interval_summary").replace("{minutes}", str(prefs.custom_frequency_minutes or 30)),
-        }.get(prefs.frequency if prefs else "every_30_min", tr(lang, "interval_30"))
-        quiet = tr(lang, f"quiet_{prefs.quiet_hours_preset or 'normal'}") if prefs else tr(lang, "quiet_normal")
-        text_value = (
-            f"{tr(lang, 'setup_ready_title')}\n\n"
-            f"{tr(lang, 'setup_ready_intro')}\n\n"
-            f"• {tr(lang, 'field_athkar')}: {names}\n"
-            f"• {tr(lang, 'field_schedule')}: {schedule}\n"
-            f"• {tr(lang, 'cfg_quiet_hours')}: {quiet}"
-        )
+        text_value = setup_summary_text(prefs, lang)
         await query.edit_message_text(text=text_value, reply_markup=setup_complete_menu(lang))
     else:
         await query.edit_message_text(text=tr(lang, "saved"), reply_markup=personal_menu(lang))
+
+
+def setup_summary_text(prefs, lang: str) -> str:
+    selected = parse_selected(prefs.selected_athkar if prefs else None)
+    names = "، ".join(selected_names(selected, lang)) or tr(lang, "empty_athkar")
+    schedule = {
+        "every_5_min": tr(lang, "interval_5"),
+        "every_30_min": tr(lang, "interval_30"),
+        "hourly": tr(lang, "interval_60"),
+        "goal_per_day": tr(lang, "daily_goal_summary").replace("{count}", str(prefs.daily_goal_count or 100)),
+        "goal_per_athkar": tr(lang, "daily_goal_each_summary").replace("{count}", str(prefs.daily_goal_count or 100)),
+        "custom_interval": tr(lang, "custom_interval_summary").replace("{minutes}", str(prefs.custom_frequency_minutes or 30)),
+    }.get(prefs.frequency if prefs else "every_30_min", tr(lang, "interval_30"))
+    quiet = tr(lang, f"quiet_{prefs.quiet_hours_preset}") if prefs and prefs.quiet_hours_preset else tr(lang, "quiet_none")
+    return (
+        f"{tr(lang, 'setup_ready_title')}\n"
+        f"{tr(lang, 'setup_ready_intro')}\n\n"
+        f"• {tr(lang, 'field_athkar')}: {names}\n"
+        f"• {tr(lang, 'field_schedule')}: {schedule}\n"
+        f"• {tr(lang, 'cfg_quiet_hours')}: {quiet}"
+    )
 
 
 async def begin_timezone_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -502,6 +611,7 @@ async def show_personal_settings(update: Update, context: ContextTypes.DEFAULT_T
         "hourly": tr(lang, "interval_60"),
         "custom_interval": f"{prefs.custom_frequency_minutes or 30} min",
         "goal_per_day": f"{prefs.daily_goal_count or 100} / day",
+        "goal_per_athkar": tr(lang, "daily_goal_each_summary").replace("{count}", str(prefs.daily_goal_count or 100)),
     }.get((prefs.frequency if prefs else "every_30_min"), tr(lang, "interval_30"))
 
     delivery_label = tr(lang, "delivery_batch") if prefs and prefs.delivery_mode == "batch" else tr(lang, "delivery_rotating")
@@ -520,6 +630,31 @@ async def show_personal_settings(update: Update, context: ContextTypes.DEFAULT_T
         f"{tr(lang, 'field_timezone')}: {timezone_name}"
     )
     await query.edit_message_text(text=text_value, reply_markup=personal_menu(lang))
+
+
+async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Expose the same settings view through Telegram's command menu."""
+    if not update.effective_user or not update.message:
+        return
+    prefs = await get_user_prefs(str(update.effective_user.id))
+    lang = normalize_lang(prefs.language if prefs else None, "ar")
+    context.user_data["lang"] = lang
+    selected = parse_selected(prefs.selected_athkar if prefs else None)
+    names = selected_names(selected, lang)
+    frequency_label = {
+        "every_5_min": tr(lang, "interval_5"), "every_30_min": tr(lang, "interval_30"),
+        "hourly": tr(lang, "interval_60"),
+        "custom_interval": tr(lang, "custom_interval_summary").replace("{minutes}", str(prefs.custom_frequency_minutes or 30)),
+        "goal_per_day": tr(lang, "daily_goal_summary").replace("{count}", str(prefs.daily_goal_count or 100)),
+        "goal_per_athkar": tr(lang, "daily_goal_each_summary").replace("{count}", str(prefs.daily_goal_count or 100)),
+    }.get(prefs.frequency if prefs else "every_30_min", tr(lang, "interval_30"))
+    text_value = (
+        f"{tr(lang, 'settings_title')}\n\n"
+        f"{tr(lang, 'field_athkar')}: {', '.join(names) or tr(lang, 'empty_athkar')}\n"
+        f"{tr(lang, 'field_schedule')}: {frequency_label}\n"
+        f"{tr(lang, 'cfg_quiet_hours')}: {tr(lang, f'quiet_{prefs.quiet_hours_preset}') if prefs else tr(lang, 'quiet_none')}"
+    )
+    await update.message.reply_text(text_value, reply_markup=personal_menu(lang))
 
 
 async def toggle_prayer(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -675,6 +810,10 @@ async def handle_location_input(update: Update, context: ContextTypes.DEFAULT_TY
         items = [(x["id"], x[key], x["id"] in selected) for x in ATHKAR_OPTIONS]
         text_value = f"{tr(lang, 'timezone_success').replace('{timezone}', timezone_name)}\n\n{tr(lang, 'setup_step_athkar')}"
         reply_markup = athkar_select_menu(lang, items)
+    elif resume_after_timezone == "personal_schedule":
+        context.user_data["setup_flow"] = True
+        text_value = f"{tr(lang, 'timezone_success').replace('{timezone}', timezone_name)}\n\n{tr(lang, 'setup_step_schedule')}"
+        reply_markup = schedule_menu(lang)
     elif prayer_setup:
         context.user_data["awaiting_prayer_setup"] = True
         text_value = f"{tr(lang, 'prayer_timezone_detected').replace('{timezone}', timezone_name)}\n\n{tr(lang, 'prayer_prompt_city')}"
@@ -739,7 +878,7 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(tr(lang, "saved"))
         return
 
-    if context.user_data.get("awaiting_custom_goal"):
+    if context.user_data.get("awaiting_custom_goal_scope"):
         if not numeric_value.isdigit():
             await update.message.reply_text(tr(lang, "invalid_number"))
             return
@@ -747,13 +886,84 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if goal_count < 1 or goal_count > 10000:
             await update.message.reply_text(tr(lang, "invalid_number"))
             return
-        context.user_data["awaiting_custom_goal"] = False
-        await update_user_settings(user_id, frequency="goal_per_day", daily_goal_count=goal_count, custom_frequency_minutes=None)
+        scope = context.user_data.pop("awaiting_custom_goal_scope")
+        prefs = await get_user_prefs(user_id)
+        selected = parse_selected(prefs.selected_athkar if prefs else None)
+        if scope == "total":
+            await update_user_settings(user_id, frequency="goal_per_day", daily_goal_count=goal_count, daily_goal_per_athkar="{}", custom_frequency_minutes=None)
+        else:
+            values = {athkar_id: goal_count for athkar_id in selected}
+            await update_user_settings(user_id, frequency="goal_per_athkar", daily_goal_count=sum(values.values()), daily_goal_per_athkar=json.dumps(values), custom_frequency_minutes=None)
         await rebuild_user_schedule(context)
         if context.user_data.get("setup_flow"):
             await update.message.reply_text(tr(lang, "setup_step_delivery"), reply_markup=delivery_menu(lang))
         else:
             await update.message.reply_text(tr(lang, "saved"))
+        return
+
+    if context.user_data.get("awaiting_advanced_goal"):
+        if not numeric_value.isdigit() or not 1 <= int(numeric_value) <= 10000:
+            await update.message.reply_text(tr(lang, "invalid_number"))
+            return
+        context.user_data.pop("awaiting_advanced_goal", None)
+        selected = context.user_data.get("advanced_goal_ids", [])
+        index = context.user_data.get("advanced_goal_index", 0)
+        if index >= len(selected):
+            return
+        context.user_data.setdefault("advanced_goal_values", {})[selected[index]] = int(numeric_value)
+        context.user_data["advanced_goal_index"] = index + 1
+        index += 1
+        if index >= len(selected):
+            values = context.user_data.get("advanced_goal_values", {})
+            await update_user_settings(user_id, frequency="goal_per_athkar", daily_goal_count=sum(values.values()), daily_goal_per_athkar=json.dumps(values), custom_frequency_minutes=None)
+            for key in ("advanced_goal_ids", "advanced_goal_values", "advanced_goal_index"):
+                context.user_data.pop(key, None)
+            await rebuild_user_schedule(context)
+            await update.message.reply_text(tr(lang, "setup_step_delivery"), reply_markup=delivery_menu(lang))
+            return
+        athkar = find_athkar(selected[index])
+        name = athkar["ar" if lang == "ar" else "en"] if athkar else selected[index]
+        prompt = tr(lang, "advanced_goal_title").replace("{name}", name).replace("{position}", str(index + 1)).replace("{total}", str(len(selected)))
+        await update.message.reply_text(prompt, reply_markup=advanced_goal_menu(lang))
+        return
+
+    if context.user_data.get("awaiting_custom_quiet_hours"):
+        value = normalize_digits(text_value).replace(" ", "")
+        match = re.fullmatch(r"(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})", value)
+        if not match:
+            await update.message.reply_text(tr(lang, "quiet_custom_invalid"))
+            return
+        start_hour, start_minute, end_hour, end_minute = map(int, match.groups())
+        if start_hour > 23 or end_hour > 23 or start_minute > 59 or end_minute > 59:
+            await update.message.reply_text(tr(lang, "quiet_custom_invalid"))
+            return
+        context.user_data.pop("awaiting_custom_quiet_hours", None)
+        await update_user_settings(user_id, quiet_hours_preset="custom", quiet_start_hour=start_hour, quiet_end_hour=end_hour, quiet_start_minute=start_minute, quiet_end_minute=end_minute)
+        await rebuild_user_schedule(context)
+        prefs = await get_user_prefs(user_id)
+        context.user_data.pop("setup_flow", None)
+        await update.message.reply_text(setup_summary_text(prefs, lang), reply_markup=setup_complete_menu(lang))
+        return
+
+    if context.user_data.get("pending_quiet_preset"):
+        lat, lon, display = await city_to_coords(text_value)
+        if lat is None or lon is None:
+            await update.message.reply_text(tr(lang, "prayer_city_failed"))
+            return
+        timezone_name = await resolve_timezone_from_coords(lat, lon)
+        if not timezone_name:
+            await update.message.reply_text(tr(lang, "prayer_city_failed"))
+            return
+        preset = context.user_data.pop("pending_quiet_preset")
+        start, end = {"fajr_isha": (0, 0), "sleep_10_fajr": (22, 5), "sleep_11_fajr": (23, 5), "sleep_12_fajr": (0, 5)}[preset]
+        await update_user_settings(
+            user_id, prayer_city=display.split(",")[0], timezone=timezone_name,
+            quiet_hours_preset=preset, quiet_start_hour=start, quiet_end_hour=end, quiet_start_minute=0, quiet_end_minute=0,
+        )
+        await rebuild_user_schedule(context)
+        prefs = await get_user_prefs(user_id)
+        context.user_data.pop("setup_flow", None)
+        await update.message.reply_text(setup_summary_text(prefs, lang), reply_markup=setup_complete_menu(lang))
         return
 
     if context.user_data.get("awaiting_community_post_text"):
@@ -874,7 +1084,7 @@ async def send_user_reminder(telegram_id: str):
     prefs = await get_user_prefs(telegram_id)
     if not prefs:
         return
-    if is_quiet_time(prefs):
+    if await is_quiet_time(prefs):
         return
     selected = parse_selected(prefs.selected_athkar)
     if not selected:
@@ -882,6 +1092,15 @@ async def send_user_reminder(telegram_id: str):
     lang = "ar" if prefs.language == "ar" else "en"
     if prefs.delivery_mode == "batch":
         ids = selected
+    elif prefs.frequency == "goal_per_athkar":
+        try:
+            goal_map = json.loads(prefs.daily_goal_per_athkar or "{}")
+        except Exception:
+            goal_map = {}
+        weighted = [athkar_id for athkar_id in selected for _ in range(max(1, int(goal_map.get(athkar_id, 1))))]
+        idx = rotation_state.get(telegram_id, 0) % len(weighted)
+        ids = [weighted[idx]]
+        rotation_state[telegram_id] = (idx + 1) % len(weighted)
     else:
         idx = rotation_state.get(telegram_id, 0) % len(selected)
         ids = [selected[idx]]
@@ -892,24 +1111,21 @@ async def send_user_reminder(telegram_id: str):
         logger.error("Cannot send user reminder: Telegram application is not ready")
         return
 
+    messages = []
     for athkar_id in ids:
         item = find_athkar(athkar_id)
         if not item:
             continue
         text_key = "text_en" if lang == "en" else "text_ar"
-        await application.bot.send_message(chat_id=int(telegram_id), text=item[text_key])
+        messages.append(item[text_key])
+    if messages:
+        await application.bot.send_message(chat_id=int(telegram_id), text="\n\n".join(messages))
 
 
 async def fetch_prayer_times_by_city(city: str, target_date):
-    date_str = target_date.strftime("%d-%m-%Y")
-    url = f"https://api.aladhan.com/v1/timings/{date_str}"
-    params = {"city": city, "method": 3}
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, params=params, timeout=15) as resp:
-            if resp.status != 200:
-                return None
-            data = await resp.json()
-            return data.get("data", {}).get("timings")
+    # The coordinate-backed community fetcher also handles multi-word cities
+    # such as San Francisco, unlike Aladhan's city-only endpoint.
+    return await fetch_prayer_times(city, target_date, 3)
 
 
 def parse_prayer_datetime(day, prayer_name: str, timings: dict, timezone_name: str):
@@ -938,7 +1154,7 @@ async def send_prayer_message(telegram_id: str, kind: str):
     await application.bot.send_message(chat_id=int(telegram_id), text=text)
 
 
-def is_quiet_time(user) -> bool:
+async def is_quiet_time(user) -> bool:
     """Evaluate the user's saved quiet hours in their own timezone."""
     if user.quiet_hours_preset == "none":
         return False
@@ -946,14 +1162,36 @@ def is_quiet_time(user) -> bool:
         local_now = datetime.now(pytz.timezone(user.timezone or "Africa/Cairo"))
     except Exception:
         local_now = datetime.now(CAIRO_TZ)
-    start, end, hour = user.quiet_start_hour or 23, user.quiet_end_hour or 6, local_now.hour
-    return start <= hour < end if start < end else hour >= start or hour < end
+    if user.quiet_hours_preset in {"fajr_isha", "sleep_10_fajr", "sleep_11_fajr", "sleep_12_fajr"} and user.prayer_city:
+        cache_key = (user.prayer_city.casefold(), local_now.date().isoformat())
+        timings = quiet_timing_cache.get(cache_key)
+        if timings is None and cache_key not in quiet_timing_cache:
+            timings = await fetch_prayer_times_by_city(user.prayer_city, local_now.date())
+            if timings:
+                quiet_timing_cache[cache_key] = timings
+        if timings:
+            fajr = parse_prayer_datetime(local_now.date(), "Fajr", timings, user.timezone or "Africa/Cairo")
+            isha = parse_prayer_datetime(local_now.date(), "Isha", timings, user.timezone or "Africa/Cairo")
+            if fajr:
+                if user.quiet_hours_preset == "fajr_isha" and isha:
+                    return local_now < fajr or local_now >= isha
+                start_hour = {"sleep_10_fajr": 22, "sleep_11_fajr": 23, "sleep_12_fajr": 0}.get(user.quiet_hours_preset)
+                if start_hour is not None:
+                    return local_now < fajr or local_now.hour >= start_hour
+        # A temporary provider failure must never turn the Fajr-to-Isha choice
+        # into a full-day pause.  The next send retries the prayer lookup.
+        if user.quiet_hours_preset == "fajr_isha":
+            return False
+    start = (user.quiet_start_hour or 0) * 60 + (user.quiet_start_minute or 0)
+    end = (user.quiet_end_hour or 0) * 60 + (user.quiet_end_minute or 0)
+    current = local_now.hour * 60 + local_now.minute
+    return start <= current < end if start < end else current >= start or current < end
 
 
 async def build_jobs_for_user(user):
     selected = parse_selected(user.selected_athkar)
     if selected:
-        if user.frequency == "goal_per_day" and user.daily_goal_count and user.daily_goal_count > 0:
+        if user.frequency in {"goal_per_day", "goal_per_athkar"} and user.daily_goal_count and user.daily_goal_count > 0:
             start, end = user.quiet_start_hour or 23, user.quiet_end_hour or 6
             awake_seconds = 86400 if user.quiet_hours_preset == "none" else (24 - ((end - start) % 24)) * 3600
             seconds = max(60, int(round(awake_seconds / user.daily_goal_count)))
