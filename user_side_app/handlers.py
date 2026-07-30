@@ -35,6 +35,7 @@ from .keyboards import (
     schedule_menu,
     setup_complete_menu,
     target_picker_menu,
+    target_request_keyboard,
 )
 from .scheduler import (
     reminder_scheduler,
@@ -71,6 +72,11 @@ def parse_selected(raw: str | None) -> list[str]:
         return value if isinstance(value, list) else []
     except Exception:
         return []
+
+
+def normalize_digits(value: str) -> str:
+    """Accept Arabic-Indic and Eastern Arabic-Indic digits in numeric settings."""
+    return value.translate(str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789"))
 
 
 def selected_names(selected_ids: list[str], lang: str) -> list[str]:
@@ -169,7 +175,9 @@ async def set_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["lang"] = lang
     await upsert_user_prefs(str(query.from_user.id), query.from_user.first_name, language=lang)
     if context.user_data.get("onboarding"):
-        await present_timezone_setup(query, context, lang)
+        context.user_data.pop("onboarding", None)
+        await update_user_settings(str(query.from_user.id), onboarding_complete=True)
+        await query.edit_message_text(text=f"{tr(lang, 'language_saved')}\n\n{tr(lang, 'choose_mode')}", reply_markup=home_menu(lang))
         return
     await query.edit_message_text(text=f"{tr(lang, 'lang_set')}\n\n{tr(lang, 'choose_mode')}", reply_markup=home_menu(lang))
 
@@ -271,6 +279,11 @@ async def begin_personal_setup(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     await query.answer()
     context.user_data["setup_flow"] = True
+    prefs = await get_user_prefs(str(query.from_user.id))
+    if not prefs or not prefs.timezone_confirmed:
+        context.user_data["resume_after_timezone"] = "personal_setup"
+        await present_timezone_setup(query, context, get_lang(context))
+        return
     await open_personal_athkar(update, context)
 
 
@@ -280,9 +293,13 @@ async def open_personal_athkar(update: Update, context: ContextTypes.DEFAULT_TYP
     lang = get_lang(context)
     user_id = str(query.from_user.id)
     prefs = await get_user_prefs(user_id)
-    selected = parse_selected(prefs.selected_athkar if prefs else None)
-    context.user_data["draft_selected"] = selected
+    if "draft_selected" not in context.user_data:
+        context.user_data["draft_selected"] = parse_selected(prefs.selected_athkar if prefs else None)
+    await render_athkar_selection(query, context, lang)
 
+
+async def render_athkar_selection(query, context: ContextTypes.DEFAULT_TYPE, lang: str):
+    selected = context.user_data.get("draft_selected", [])
     key = "en" if lang == "en" else "ar"
     items = [(x["id"], x[key], x["id"] in selected) for x in ATHKAR_OPTIONS]
     await query.edit_message_text(text=tr(lang, "athkar_menu_title"), reply_markup=athkar_select_menu(lang, items))
@@ -299,23 +316,21 @@ async def toggle_athkar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         selected.append(athkar_id)
 
-    key = "en" if lang == "en" else "ar"
-    items = [(x["id"], x[key], x["id"] in selected) for x in ATHKAR_OPTIONS]
-    await query.edit_message_text(text=tr(lang, "athkar_menu_title"), reply_markup=athkar_select_menu(lang, items))
+    await render_athkar_selection(query, context, lang)
 
 
 async def select_all_athkar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     context.user_data["draft_selected"] = [x["id"] for x in ATHKAR_OPTIONS]
-    await open_personal_athkar(update, context)
+    await render_athkar_selection(query, context, get_lang(context))
 
 
 async def clear_all_athkar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     context.user_data["draft_selected"] = []
-    await open_personal_athkar(update, context)
+    await render_athkar_selection(query, context, get_lang(context))
 
 
 async def save_athkar(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -510,6 +525,11 @@ async def toggle_prayer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text=tr(lang, "prayer_disabled_done"), reply_markup=personal_menu(lang))
         return
 
+    if prefs and prefs.timezone_confirmed:
+        context.user_data["awaiting_prayer_setup"] = True
+        await query.edit_message_text(text=tr(lang, "prayer_prompt_city"), reply_markup=personal_menu(lang))
+        return
+
     context.user_data["awaiting_prayer_setup"] = True
     context.user_data["timezone_main_message_id"] = query.message.message_id
     await query.edit_message_text(
@@ -559,10 +579,25 @@ async def handle_location_input(update: Update, context: ContextTypes.DEFAULT_TY
     prayer_setup = context.user_data.pop("awaiting_prayer_setup", False)
     context.user_data.pop("awaiting_timezone_setup", None)
     onboarding = context.user_data.pop("onboarding", False)
+    resume_after_timezone = context.user_data.pop("resume_after_timezone", None)
     # Coordinates are deliberately not persisted; location is used only to infer timezone.
-    await update_user_settings(user_id, timezone=timezone_name, onboarding_complete=True if onboarding else None)
+    await update_user_settings(
+        user_id,
+        timezone=timezone_name,
+        timezone_confirmed=True,
+        onboarding_complete=True if onboarding else None,
+    )
     await rebuild_user_schedule(context)
-    if prayer_setup:
+    if resume_after_timezone == "personal_setup":
+        context.user_data["setup_flow"] = True
+        prefs = await get_user_prefs(user_id)
+        context.user_data["draft_selected"] = parse_selected(prefs.selected_athkar if prefs else None)
+        selected = context.user_data["draft_selected"]
+        key = "en" if lang == "en" else "ar"
+        items = [(x["id"], x[key], x["id"] in selected) for x in ATHKAR_OPTIONS]
+        text_value = f"{tr(lang, 'timezone_success').replace('{timezone}', timezone_name)}\n\n{tr(lang, 'setup_step_athkar')}"
+        reply_markup = athkar_select_menu(lang, items)
+    elif prayer_setup:
         context.user_data["awaiting_prayer_setup"] = True
         text_value = f"{tr(lang, 'prayer_timezone_detected').replace('{timezone}', timezone_name)}\n\n{tr(lang, 'prayer_prompt_city')}"
         reply_markup = personal_menu(lang)
@@ -607,12 +642,13 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = get_lang(context)
     user_id = str(update.effective_user.id)
     text_value = (update.message.text or "").strip()
+    numeric_value = normalize_digits(text_value)
 
     if context.user_data.get("awaiting_custom_interval"):
-        if not text_value.isdigit():
+        if not numeric_value.isdigit():
             await update.message.reply_text(tr(lang, "invalid_number"))
             return
-        minutes = int(text_value)
+        minutes = int(numeric_value)
         if minutes < 1 or minutes > 1440:
             await update.message.reply_text(tr(lang, "invalid_number"))
             return
@@ -626,10 +662,10 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if context.user_data.get("awaiting_custom_goal"):
-        if not text_value.isdigit():
+        if not numeric_value.isdigit():
             await update.message.reply_text(tr(lang, "invalid_number"))
             return
-        goal_count = int(text_value)
+        goal_count = int(numeric_value)
         if goal_count < 1 or goal_count > 10000:
             await update.message.reply_text(tr(lang, "invalid_number"))
             return
@@ -851,6 +887,51 @@ async def show_target_picker(query, context: ContextTypes.DEFAULT_TYPE, lang: st
         await query.edit_message_text(text=f"{tr(lang, setup_key)}\n\n{tr(lang, 'target_none')}", reply_markup=group_menu(lang) if mode == "group" else channel_menu(lang))
         return
     await query.edit_message_text(text=tr(lang, "target_picker_title"), reply_markup=target_picker_menu(lang, targets))
+
+
+async def request_target_discovery(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Open Telegram's native chooser for chats where this bot is already a member."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(context)
+    mode = context.user_data.get("active_mode", "group")
+    context.user_data["awaiting_target_mode"] = mode
+    await context.bot.send_message(
+        chat_id=query.from_user.id,
+        text=tr(lang, "target_discovery_prompt"),
+        reply_markup=target_request_keyboard(lang, mode),
+    )
+
+
+async def handle_chat_shared(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.chat_shared or not update.effective_user:
+        return
+    mode = context.user_data.get("awaiting_target_mode")
+    if not mode:
+        return
+    lang = get_lang(context)
+    chat_id = update.message.chat_shared.chat_id
+    try:
+        chat = await context.bot.get_chat(chat_id)
+        bot_user = await context.bot.get_me()
+        membership = await context.bot.get_chat_member(chat_id, bot_user.id)
+        if membership.status not in ("administrator", "owner", "creator"):
+            await update.message.reply_text(tr(lang, "target_needs_admin"), reply_markup=ReplyKeyboardRemove())
+            return
+        await add_or_update_target(
+            str(update.effective_user.id), str(chat_id), chat.title or chat.username or str(chat_id), chat.type,
+        )
+        context.user_data.pop("awaiting_target_mode", None)
+        await update.message.reply_text(tr(lang, "target_discovered"), reply_markup=ReplyKeyboardRemove())
+        targets = await list_targets(str(update.effective_user.id), mode)
+        await context.bot.send_message(
+            chat_id=update.effective_user.id,
+            text=tr(lang, "target_picker_title"),
+            reply_markup=target_picker_menu(lang, targets),
+        )
+    except Exception:
+        logger.exception("Failed to discover shared chat %s", chat_id)
+        await update.message.reply_text(tr(lang, "target_discovery_failed"), reply_markup=ReplyKeyboardRemove())
 
 
 async def select_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
