@@ -33,6 +33,7 @@ from .keyboards import (
     quiet_hours_menu,
     remove_target_menu,
     schedule_menu,
+    target_picker_menu,
 )
 from .scheduler import (
     reminder_scheduler,
@@ -129,6 +130,22 @@ async def go_home(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text=f"{tr(lang, 'welcome')}\n\n{tr(lang, 'choose_mode')}\n\n({UI_BUILD})",
         reply_markup=home_menu(lang),
     )
+
+
+async def close_to_home(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Clear a completed setup screen and return to the concise start menu."""
+    query = update.callback_query
+    await query.answer()
+    context.user_data.clear()
+    lang = "ar"
+    if query.from_user:
+        prefs = await get_user_prefs(str(query.from_user.id))
+        lang = normalize_lang(prefs.language if prefs else None, "ar")
+    try:
+        await query.delete_message()
+    except BadRequest:
+        pass
+    await context.bot.send_message(chat_id=query.from_user.id, text=f"{tr(lang, 'welcome')}\n\n{tr(lang, 'choose_mode')}", reply_markup=home_menu(lang))
 
 
 async def version(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -739,7 +756,7 @@ async def choose_group_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.from_user:
         await upsert_user_prefs(str(query.from_user.id), query.from_user.first_name, mode="group")
     context.user_data["active_mode"] = "group"
-    await query.edit_message_text(text=f"{tr(lang, 'group_menu')}\n\n{tr(lang, 'target_setup_group')}", reply_markup=group_menu(lang))
+    await show_target_picker(query, context, lang, "group")
 
 
 async def choose_channel_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -749,7 +766,39 @@ async def choose_channel_mode(update: Update, context: ContextTypes.DEFAULT_TYPE
     if query.from_user:
         await upsert_user_prefs(str(query.from_user.id), query.from_user.first_name, mode="channel")
     context.user_data["active_mode"] = "channel"
-    await query.edit_message_text(text=f"{tr(lang, 'channel_menu')}\n\n{tr(lang, 'target_setup_channel')}", reply_markup=channel_menu(lang))
+    await show_target_picker(query, context, lang, "channel")
+
+
+async def show_target_picker(query, context: ContextTypes.DEFAULT_TYPE, lang: str, mode: str):
+    targets = await list_targets(str(query.from_user.id), mode)
+    if not targets:
+        setup_key = "target_setup_channel" if mode == "channel" else "target_setup_group"
+        await query.edit_message_text(text=f"{tr(lang, setup_key)}\n\n{tr(lang, 'target_none')}", reply_markup=group_menu(lang) if mode == "group" else channel_menu(lang))
+        return
+    await query.edit_message_text(text=tr(lang, "target_picker_title"), reply_markup=target_picker_menu(lang, targets))
+
+
+async def select_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    context.user_data["selected_target_id"] = query.data.removeprefix("target_select_")
+    lang = get_lang(context)
+    await query.edit_message_text(text=tr(lang, "target_selected"), reply_markup=group_menu(lang) if context.user_data.get("active_mode") == "group" else channel_menu(lang))
+
+
+async def auto_register_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Register a group/channel when the bot itself becomes an administrator."""
+    change = update.my_chat_member
+    if not change or change.chat.type not in ("group", "supergroup", "channel"):
+        return
+    if change.new_chat_member.status not in ("administrator", "owner", "creator"):
+        return
+    owner = change.from_user
+    if not owner:
+        return
+    chat = change.chat
+    await add_or_update_target(str(owner.id), str(chat.id), chat.title or chat.username or str(chat.id), chat.type)
+    logger.info("Auto-registered %s %s for owner %s", chat.type, chat.id, owner.id)
 
 
 async def manage_targets(update: Update, context: ContextTypes.DEFAULT_TYPE):

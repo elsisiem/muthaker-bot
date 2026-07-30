@@ -1,15 +1,17 @@
 import logging
 
 from aiohttp import web
-from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters
+from telegram.ext import Application, CallbackQueryHandler, ChatMemberHandler, CommandHandler, MessageHandler, filters
 
 from .config import TOKEN
 from .db import init_db
 from .handlers import (
     config_placeholder,
+    auto_register_target,
     choose_channel_mode,
     choose_group_mode,
     choose_personal_mode,
+    close_to_home,
     begin_personal_setup,
     clear_all_athkar,
     handle_location_input,
@@ -23,6 +25,7 @@ from .handlers import (
     open_quiet_hours_menu,
     open_schedule_menu,
     remove_target_callback,
+    select_target,
     save_athkar,
     send_test_to_targets,
     select_all_athkar,
@@ -46,10 +49,12 @@ application = Application.builder().token(TOKEN).build()
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CommandHandler("link", link_target))
 application.add_handler(CommandHandler("version", version))
+application.add_handler(ChatMemberHandler(auto_register_target, ChatMemberHandler.MY_CHAT_MEMBER))
 
 application.add_handler(CallbackQueryHandler(set_language, pattern="^lang_[a-z]{2}$"))
 application.add_handler(CallbackQueryHandler(open_language_menu, pattern="^open_lang_menu$"))
 application.add_handler(CallbackQueryHandler(go_home, pattern="^home$"))
+application.add_handler(CallbackQueryHandler(close_to_home, pattern="^close_home$"))
 application.add_handler(CallbackQueryHandler(choose_personal_mode, pattern="^mode_personal$"))
 application.add_handler(CallbackQueryHandler(begin_personal_setup, pattern="^cfg_personal_setup$"))
 application.add_handler(CallbackQueryHandler(choose_group_mode, pattern="^mode_group$"))
@@ -71,6 +76,7 @@ application.add_handler(CallbackQueryHandler(show_personal_settings, pattern="^c
 application.add_handler(CallbackQueryHandler(manage_targets, pattern="^targets_manage_group$|^targets_manage_channel$|^targets_manage$"))
 application.add_handler(CallbackQueryHandler(send_test_to_targets, pattern="^targets_test$"))
 application.add_handler(CallbackQueryHandler(remove_target_callback, pattern="^target_remove_"))
+application.add_handler(CallbackQueryHandler(select_target, pattern="^target_select_"))
 application.add_handler(CallbackQueryHandler(config_placeholder, pattern="^cfg_"))
 application.add_handler(MessageHandler(filters.LOCATION, handle_location_input))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_input))
