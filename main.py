@@ -19,7 +19,8 @@ from fazkerbot import (
 # User side imports
 from user_side_app.app import web_app, application, init_db, start_user_reminder_scheduler, stop_user_reminder_scheduler
 from user_side_app.handlers import build_jobs_for_user
-from user_side_app.scheduler import rebuild_all_jobs, schedule_daily_rebuild, set_application
+from user_side_app.scheduler import rebuild_all_jobs, schedule_community_dispatch, schedule_daily_rebuild, set_application
+from user_side_app.community_dispatcher import dispatch_community_posts
 
 # Setup logging
 logging.basicConfig(
@@ -86,6 +87,7 @@ async def run_user_bot():
         await start_user_reminder_scheduler()
         await rebuild_all_jobs(build_jobs_for_user)
         schedule_daily_rebuild(lambda: rebuild_all_jobs(build_jobs_for_user))
+        schedule_community_dispatch(dispatch_community_posts)
         logger.info("User reminder scheduler active")
 
         while True:

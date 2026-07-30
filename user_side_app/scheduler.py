@@ -45,6 +45,19 @@ def schedule_daily_rebuild(rebuilder):
     )
 
 
+def schedule_community_dispatch(dispatcher):
+    """Run linked group/channel delivery on a short, idempotent interval."""
+    reminder_scheduler.add_job(
+        dispatcher,
+        trigger="interval",
+        minutes=1,
+        id="community_post_dispatch",
+        replace_existing=True,
+        misfire_grace_time=180,
+        coalesce=True,
+    )
+
+
 def clear_jobs(prefixes: tuple[str, ...] = ("user_reminder_", "prayer_reminder_")):
     for job in reminder_scheduler.get_jobs():
         if any(job.id.startswith(p) for p in prefixes):

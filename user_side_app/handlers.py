@@ -11,20 +11,22 @@ from telegram.ext import ContextTypes
 
 from .db import (
     add_or_update_target,
+    get_target,
     get_user_prefs,
     list_active_users,
     list_targets,
     remove_target,
+    update_target_settings,
     update_user_settings,
     upsert_user_prefs,
 )
 from .i18n import normalize_lang, tr
 from .keyboards import (
     athkar_select_menu,
-    channel_menu,
+    community_connect_menu,
+    community_menu,
     delivery_menu,
     goal_menu,
-    group_menu,
     home_menu,
     interval_menu,
     language_menu,
@@ -43,6 +45,7 @@ from .scheduler import (
     set_application,
     get_application,
 )
+from .community_dispatcher import fetch_prayer_times
 from services.timezone_service import detect_timezone_from_location
 
 logger = logging.getLogger(__name__)
@@ -678,6 +681,34 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(tr(lang, "saved"))
         return
 
+    if context.user_data.get("awaiting_target_city"):
+        target = await get_target(user_id, context.user_data.get("selected_target_id", ""))
+        if not target:
+            context.user_data.pop("awaiting_target_city", None)
+            await update.message.reply_text(tr(lang, "target_none"), reply_markup=community_connect_menu(lang))
+            return
+        lat, lon, display = await city_to_coords(text_value)
+        if lat is None or lon is None:
+            await update.message.reply_text(tr(lang, "community_city_failed"))
+            return
+        timezone_name = await resolve_timezone_from_coords(lat, lon)
+        if not timezone_name:
+            await update.message.reply_text(tr(lang, "community_city_failed"))
+            return
+        city_name = display.split(",")[0]
+        target = await update_target_settings(user_id, target.chat_id, city=city_name, timezone=timezone_name)
+        context.user_data.pop("awaiting_target_city", None)
+        timings = await fetch_prayer_times(city_name, datetime.now(pytz.timezone(timezone_name)).date(), target.prayer_method or 3)
+        saved = tr(lang, "community_city_saved").replace("{target}", target.chat_title or target.chat_id).replace("{city}", city_name).replace("{timezone}", timezone_name)
+        if timings:
+            await update.message.reply_text(
+                f"{saved}\n\n{format_community_prayer_times(lang, target, timings)}",
+                reply_markup=community_menu(lang, target),
+            )
+        else:
+            await update.message.reply_text(f"{saved}\n\n{tr(lang, 'community_prayer_failed')}", reply_markup=community_menu(lang, target))
+        return
+
     if context.user_data.get("awaiting_timezone_setup"):
         lat, lon, _ = await city_to_coords(text_value)
         timezone_name = await resolve_timezone_from_coords(lat, lon) if lat is not None else None
@@ -861,30 +892,32 @@ async def rebuild_user_schedule(context: ContextTypes.DEFAULT_TYPE):
 
 
 async def choose_group_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    lang = get_lang(context)
-    if query.from_user:
-        await upsert_user_prefs(str(query.from_user.id), query.from_user.first_name, mode="group")
-    context.user_data["active_mode"] = "group"
-    await show_target_picker(query, context, lang, "group")
+    """Compatibility entry point for buttons from earlier releases."""
+    await choose_community_mode(update, context)
 
 
 async def choose_channel_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Compatibility entry point for buttons from earlier releases."""
+    await choose_community_mode(update, context)
+
+
+async def choose_community_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     lang = get_lang(context)
     if query.from_user:
-        await upsert_user_prefs(str(query.from_user.id), query.from_user.first_name, mode="channel")
-    context.user_data["active_mode"] = "channel"
-    await show_target_picker(query, context, lang, "channel")
+        await upsert_user_prefs(str(query.from_user.id), query.from_user.first_name, mode="community")
+    context.user_data["active_mode"] = "community"
+    await show_target_picker(query, context, lang)
 
 
-async def show_target_picker(query, context: ContextTypes.DEFAULT_TYPE, lang: str, mode: str):
-    targets = await list_targets(str(query.from_user.id), mode)
+async def show_target_picker(query, context: ContextTypes.DEFAULT_TYPE, lang: str):
+    targets = await list_targets(str(query.from_user.id))
     if not targets:
-        setup_key = "target_setup_channel" if mode == "channel" else "target_setup_group"
-        await query.edit_message_text(text=f"{tr(lang, setup_key)}\n\n{tr(lang, 'target_none')}", reply_markup=group_menu(lang) if mode == "group" else channel_menu(lang))
+        await query.edit_message_text(
+            text=f"{tr(lang, 'target_setup_community')}\n\n{tr(lang, 'target_none')}",
+            reply_markup=community_connect_menu(lang),
+        )
         return
     await query.edit_message_text(text=tr(lang, "target_picker_title"), reply_markup=target_picker_menu(lang, targets))
 
@@ -894,7 +927,10 @@ async def request_target_discovery(update: Update, context: ContextTypes.DEFAULT
     query = update.callback_query
     await query.answer()
     lang = get_lang(context)
-    mode = context.user_data.get("active_mode", "group")
+    if query.data == "targets_refresh":
+        await query.edit_message_text(text=tr(lang, "target_setup_community"), reply_markup=community_connect_menu(lang))
+        return
+    mode = "channel" if query.data == "targets_refresh_channel" else "group"
     context.user_data["awaiting_target_mode"] = mode
     await context.bot.send_message(
         chat_id=query.from_user.id,
@@ -923,7 +959,7 @@ async def handle_chat_shared(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         context.user_data.pop("awaiting_target_mode", None)
         await update.message.reply_text(tr(lang, "target_discovered"), reply_markup=ReplyKeyboardRemove())
-        targets = await list_targets(str(update.effective_user.id), mode)
+        targets = await list_targets(str(update.effective_user.id))
         await context.bot.send_message(
             chat_id=update.effective_user.id,
             text=tr(lang, "target_picker_title"),
@@ -937,9 +973,99 @@ async def handle_chat_shared(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def select_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    context.user_data["selected_target_id"] = query.data.removeprefix("target_select_")
+    target_id = query.data.removeprefix("target_select_")
+    context.user_data["selected_target_id"] = target_id
     lang = get_lang(context)
-    await query.edit_message_text(text=tr(lang, "target_selected"), reply_markup=group_menu(lang) if context.user_data.get("active_mode") == "group" else channel_menu(lang))
+    target = await get_target(str(query.from_user.id), target_id)
+    if not target:
+        await show_target_picker(query, context, lang)
+        return
+    if not target.city:
+        context.user_data["awaiting_target_city"] = True
+        await query.edit_message_text(text=tr(lang, "community_city_prompt"), reply_markup=community_connect_menu(lang))
+        return
+    await render_community_menu(query, context, lang, target)
+
+
+async def render_community_menu(query, context: ContextTypes.DEFAULT_TYPE, lang: str, target=None):
+    if target is None:
+        if not query.from_user:
+            return
+        target = await get_target(str(query.from_user.id), context.user_data.get("selected_target_id", ""))
+    if not target:
+        await show_target_picker(query, context, lang)
+        return
+    title = target.chat_title or target.chat_id
+    text_value = (
+        f"{tr(lang, 'community_title').replace('{target}', title)}\n\n"
+        f"{tr(lang, 'community_intro').replace('{target}', title)}\n\n"
+        f"📍 {target.city} · {target.timezone}"
+    )
+    await query.edit_message_text(text=text_value, reply_markup=community_menu(lang, target))
+
+
+async def toggle_community_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not query.from_user:
+        return
+    target = await get_target(str(query.from_user.id), context.user_data.get("selected_target_id", ""))
+    if not target:
+        await show_target_picker(query, context, get_lang(context))
+        return
+    fields = {
+        "morning": "morning_athkar_enabled", "night": "night_athkar_enabled",
+        "monday": "monday_fasting_enabled", "thursday": "thursday_fasting_enabled",
+    }
+    field = fields.get(query.data.removeprefix("community_toggle_"))
+    if not field:
+        return
+    setattr(target, field, not bool(getattr(target, field)))
+    await update_target_settings(str(query.from_user.id), target.chat_id, **{field: getattr(target, field)})
+    await render_community_menu(query, context, get_lang(context), target)
+
+
+async def change_community_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not context.user_data.get("selected_target_id"):
+        await show_target_picker(query, context, get_lang(context))
+        return
+    context.user_data["awaiting_target_city"] = True
+    await query.edit_message_text(text=tr(get_lang(context), "community_city_prompt"), reply_markup=community_connect_menu(get_lang(context)))
+
+
+def format_community_prayer_times(lang: str, target, timings: dict) -> str:
+    try:
+        local_day = datetime.now(pytz.timezone(target.timezone or "Africa/Cairo")).date()
+    except pytz.UnknownTimeZoneError:
+        local_day = datetime.now(CAIRO_TZ).date()
+    labels = {
+        "ar": (("Fajr", "الفجر"), ("Sunrise", "الشروق"), ("Dhuhr", "الظهر"), ("Asr", "العصر"), ("Maghrib", "المغرب"), ("Isha", "العشاء")),
+        "en": (("Fajr", "Fajr"), ("Sunrise", "Sunrise"), ("Dhuhr", "Dhuhr"), ("Asr", "Asr"), ("Maghrib", "Maghrib"), ("Isha", "Isha")),
+    }
+    pairs = labels["ar" if lang == "ar" else "en"]
+    heading = tr(lang, "community_prayer_title").replace("{city}", target.city).replace("{date}", local_day.isoformat())
+    return "\n".join([heading, *(f"{label}: {timings.get(key, '—').split(' ')[0]}" for key, label in pairs)])
+
+
+async def show_community_prayer_times(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(context)
+    target = await get_target(str(query.from_user.id), context.user_data.get("selected_target_id", ""))
+    if not target or not target.city:
+        await query.edit_message_text(text=tr(lang, "community_prayer_missing_city"), reply_markup=community_connect_menu(lang))
+        return
+    try:
+        local_day = datetime.now(pytz.timezone(target.timezone or "Africa/Cairo")).date()
+    except pytz.UnknownTimeZoneError:
+        local_day = datetime.now(CAIRO_TZ).date()
+    timings = await fetch_prayer_times(target.city, local_day, target.prayer_method or 3)
+    if not timings:
+        await query.edit_message_text(text=tr(lang, "community_prayer_failed"), reply_markup=community_menu(lang, target))
+        return
+    await query.edit_message_text(text=format_community_prayer_times(lang, target, timings), reply_markup=community_menu(lang, target))
 
 
 async def auto_register_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -964,12 +1090,12 @@ async def manage_targets(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     lang = get_lang(context)
-    mode = context.user_data.get("active_mode", "group")
     targets = await list_targets(str(query.from_user.id))
     if not targets:
-        setup_text = tr(lang, "target_setup_channel") if mode == "channel" else tr(lang, "target_setup_group")
-        back_menu = channel_menu(lang) if mode == "channel" else group_menu(lang)
-        await query.edit_message_text(text=f"{setup_text}\n\n{tr(lang, 'target_none')}", reply_markup=back_menu)
+        await query.edit_message_text(
+            text=f"{tr(lang, 'target_setup_community')}\n\n{tr(lang, 'target_none')}",
+            reply_markup=community_connect_menu(lang),
+        )
         return
 
     lines = [tr(lang, "target_list_title")]
@@ -987,11 +1113,10 @@ async def remove_target_callback(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     lang = get_lang(context)
-    mode = context.user_data.get("active_mode", "group")
     chat_id = query.data.replace("target_remove_", "")
     await remove_target(str(query.from_user.id), chat_id)
-    back_menu = channel_menu(lang) if mode == "channel" else group_menu(lang)
-    await query.edit_message_text(text=tr(lang, "target_unlinked"), reply_markup=back_menu)
+    context.user_data.pop("selected_target_id", None)
+    await query.edit_message_text(text=tr(lang, "target_unlinked"), reply_markup=community_connect_menu(lang))
 
 
 async def link_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1019,31 +1144,17 @@ async def send_test_to_targets(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     lang = get_lang(context)
-    mode = context.user_data.get("active_mode", "group")
-    back_menu = channel_menu(lang) if mode == "channel" else group_menu(lang)
-    targets = await list_targets(str(query.from_user.id))
-    if not targets:
-        await query.edit_message_text(text=tr(lang, "no_target_for_test"), reply_markup=back_menu)
+    target = await get_target(str(query.from_user.id), context.user_data.get("selected_target_id", ""))
+    if not target:
+        await query.edit_message_text(text=tr(lang, "no_target_for_test"), reply_markup=community_connect_menu(lang))
         return
+    back_menu = community_menu(lang, target)
+    targets = [target]
 
     for t in targets:
         try:
-            await context.bot.send_message(chat_id=int(t.chat_id), text="📿 رسالة اختبار من مذكر الاذكار")
+            await context.bot.send_message(chat_id=int(t.chat_id), text=tr(lang, "community_test_text"))
         except Exception as exc:
             logger.warning("Failed sending test to %s: %s", t.chat_id, exc)
 
     await query.edit_message_text(text=tr(lang, "test_sent"), reply_markup=back_menu)
-
-
-async def config_placeholder(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    lang = get_lang(context)
-    mode = context.user_data.get("active_mode", "personal")
-    if mode == "channel":
-        back_menu = channel_menu(lang)
-    elif mode == "group":
-        back_menu = group_menu(lang)
-    else:
-        back_menu = personal_menu(lang)
-    await query.edit_message_text(text=tr(lang, "cfg_comming_soon"), reply_markup=back_menu)

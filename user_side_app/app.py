@@ -6,9 +6,9 @@ from telegram.ext import Application, CallbackQueryHandler, ChatMemberHandler, C
 from .config import TOKEN
 from .db import init_db
 from .handlers import (
-    config_placeholder,
     auto_register_target,
     choose_channel_mode,
+    choose_community_mode,
     choose_group_mode,
     choose_personal_mode,
     close_to_home,
@@ -38,7 +38,10 @@ from .handlers import (
     start,
     show_personal_settings,
     toggle_athkar,
+    toggle_community_post,
     toggle_prayer,
+    change_community_city,
+    show_community_prayer_times,
     begin_timezone_setup,
     version,
 )
@@ -65,6 +68,10 @@ application.add_handler(CallbackQueryHandler(choose_personal_mode, pattern="^mod
 application.add_handler(CallbackQueryHandler(begin_personal_setup, pattern="^cfg_personal_setup$"))
 application.add_handler(CallbackQueryHandler(choose_group_mode, pattern="^mode_group$"))
 application.add_handler(CallbackQueryHandler(choose_channel_mode, pattern="^mode_channel$"))
+application.add_handler(CallbackQueryHandler(choose_community_mode, pattern="^mode_community$"))
+# Previously sent group/channel cards now reopen the real unified flow instead
+# of leading to the old placeholder screen.
+application.add_handler(CallbackQueryHandler(choose_community_mode, pattern="^cfg_(group|channel)_"))
 application.add_handler(CallbackQueryHandler(open_personal_athkar, pattern="^cfg_personal_athkar$"))
 application.add_handler(CallbackQueryHandler(toggle_athkar, pattern="^athkar_toggle_"))
 application.add_handler(CallbackQueryHandler(select_all_athkar, pattern="^athkar_select_all$"))
@@ -81,10 +88,12 @@ application.add_handler(CallbackQueryHandler(set_quiet_hours, pattern="^quiet_(n
 application.add_handler(CallbackQueryHandler(show_personal_settings, pattern="^cfg_personal_show$"))
 application.add_handler(CallbackQueryHandler(manage_targets, pattern="^targets_manage_group$|^targets_manage_channel$|^targets_manage$"))
 application.add_handler(CallbackQueryHandler(send_test_to_targets, pattern="^targets_test$"))
-application.add_handler(CallbackQueryHandler(request_target_discovery, pattern="^targets_refresh$"))
+application.add_handler(CallbackQueryHandler(request_target_discovery, pattern="^targets_refresh(?:_group|_channel)?$"))
 application.add_handler(CallbackQueryHandler(remove_target_callback, pattern="^target_remove_"))
 application.add_handler(CallbackQueryHandler(select_target, pattern="^target_select_"))
-application.add_handler(CallbackQueryHandler(config_placeholder, pattern="^cfg_"))
+application.add_handler(CallbackQueryHandler(toggle_community_post, pattern="^community_toggle_"))
+application.add_handler(CallbackQueryHandler(change_community_city, pattern="^community_change_city$"))
+application.add_handler(CallbackQueryHandler(show_community_prayer_times, pattern="^community_prayer_times$"))
 application.add_handler(MessageHandler(filters.StatusUpdate.CHAT_SHARED, handle_chat_shared))
 application.add_handler(MessageHandler(filters.LOCATION, handle_location_input))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_input))
