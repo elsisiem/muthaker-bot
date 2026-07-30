@@ -175,14 +175,17 @@ async def add_or_update_target(owner_telegram_id: str, chat_id: str, chat_title:
         return row
 
 
-async def list_targets(owner_telegram_id: str) -> list[PostingTarget]:
+async def list_targets(owner_telegram_id: str, chat_type: str | None = None) -> list[PostingTarget]:
     async with async_session() as session:
-        result = await session.execute(
-            select(PostingTarget).where(
-                PostingTarget.owner_telegram_id == owner_telegram_id,
-                PostingTarget.is_active == True,
-            )
+        statement = select(PostingTarget).where(
+            PostingTarget.owner_telegram_id == owner_telegram_id,
+            PostingTarget.is_active == True,
         )
+        if chat_type == "group":
+            statement = statement.where(PostingTarget.chat_type.in_(("group", "supergroup")))
+        elif chat_type:
+            statement = statement.where(PostingTarget.chat_type == chat_type)
+        result = await session.execute(statement.order_by(PostingTarget.created_at.desc()))
         return list(result.scalars().all())
 
 

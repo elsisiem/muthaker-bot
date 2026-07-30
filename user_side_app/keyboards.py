@@ -25,7 +25,10 @@ def home_menu(lang: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(tr(lang, "mode_personal"), callback_data="mode_personal")],
         [InlineKeyboardButton(tr(lang, "mode_group"), callback_data="mode_group")],
         [InlineKeyboardButton(tr(lang, "mode_channel"), callback_data="mode_channel")],
-        persistent_language_row(lang),
+        [
+            InlineKeyboardButton(tr(lang, "cfg_timezone"), callback_data="cfg_personal_timezone"),
+            InlineKeyboardButton(tr(lang, "lang_button"), callback_data="open_lang_menu"),
+        ],
     ]
     return InlineKeyboardMarkup(rows)
 
@@ -42,7 +45,6 @@ def personal_menu(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(tr(lang, "setup_reminders"), callback_data="cfg_personal_setup")],
         [InlineKeyboardButton(tr(lang, "cfg_prayer"), callback_data="cfg_personal_prayer")],
-        [InlineKeyboardButton(tr(lang, "cfg_timezone"), callback_data="cfg_personal_timezone")],
         [InlineKeyboardButton(tr(lang, "show_settings"), callback_data="cfg_personal_show")],
         persistent_language_row(lang),
         [InlineKeyboardButton(tr(lang, "back"), callback_data="home")],
@@ -89,9 +91,8 @@ def athkar_select_menu(lang: str, items: list[tuple[str, str, bool]]) -> InlineK
         InlineKeyboardButton(tr(lang, "choose_all"), callback_data="athkar_select_all"),
         InlineKeyboardButton(tr(lang, "clear_all"), callback_data="athkar_clear_all"),
     ])
-    rows.append([InlineKeyboardButton(tr(lang, "save"), callback_data="athkar_save")])
-    rows.append(persistent_language_row(lang))
-    rows.append([InlineKeyboardButton(tr(lang, "back"), callback_data="mode_personal")])
+    rows.append([InlineKeyboardButton(tr(lang, "save_continue"), callback_data="athkar_save")])
+    rows.append([InlineKeyboardButton(tr(lang, "close"), callback_data="close_home")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -145,9 +146,18 @@ def quiet_hours_menu(lang: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(tr(lang, "quiet_early"), callback_data="quiet_early")],
         [InlineKeyboardButton(tr(lang, "quiet_night_owl"), callback_data="quiet_night_owl")],
         [InlineKeyboardButton(tr(lang, "quiet_none"), callback_data="quiet_none")],
-        persistent_language_row(lang),
-        [InlineKeyboardButton(tr(lang, "back"), callback_data="mode_personal")],
+        [InlineKeyboardButton(tr(lang, "close"), callback_data="close_home")],
     ])
+
+
+def target_picker_menu(lang: str, targets) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(f"{'📣' if target.chat_type == 'channel' else '👥'} {target.chat_title or target.chat_id}", callback_data=f"target_select_{target.chat_id}")]
+        for target in targets
+    ]
+    rows.append([InlineKeyboardButton(tr(lang, "send_test"), callback_data="targets_test")])
+    rows.append([InlineKeyboardButton(tr(lang, "close"), callback_data="close_home")])
+    return InlineKeyboardMarkup(rows)
 
 
 def location_request_keyboard(lang: str) -> ReplyKeyboardMarkup:
