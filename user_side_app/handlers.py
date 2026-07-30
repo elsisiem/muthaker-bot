@@ -33,6 +33,7 @@ from .keyboards import (
     quiet_hours_menu,
     remove_target_menu,
     schedule_menu,
+    setup_complete_menu,
     target_picker_menu,
 )
 from .scheduler import (
@@ -114,10 +115,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     first_name = update.effective_user.first_name
     prefs = await get_user_prefs(user_id)
-
     lang = normalize_lang(prefs.language if prefs else None, "ar")
     context.user_data["lang"] = lang
-    await upsert_user_prefs(user_id, first_name, language=lang)
+    prefs = await upsert_user_prefs(user_id, first_name, language=lang)
+
+    if not prefs.onboarding_complete:
+        context.user_data["onboarding"] = True
+        await send_or_edit(update, context, tr(lang, "onboarding_language_title"), language_menu(lang, show_back=False))
+        return
 
     text_value = f"{tr(lang, 'welcome')}\n\n{tr(lang, 'choose_mode')}\n\n({UI_BUILD})"
     await send_or_edit(update, context, text_value, home_menu(lang))
@@ -163,7 +168,26 @@ async def set_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = normalize_lang(query.data.replace("lang_", ""), "ar")
     context.user_data["lang"] = lang
     await upsert_user_prefs(str(query.from_user.id), query.from_user.first_name, language=lang)
+    if context.user_data.get("onboarding"):
+        await present_timezone_setup(query, context, lang)
+        return
     await query.edit_message_text(text=f"{tr(lang, 'lang_set')}\n\n{tr(lang, 'choose_mode')}", reply_markup=home_menu(lang))
+
+
+async def present_timezone_setup(query, context: ContextTypes.DEFAULT_TYPE, lang: str):
+    """Reuse the current setup message; only the temporary location prompt is separate."""
+    context.user_data["awaiting_timezone_setup"] = True
+    context.user_data["timezone_main_message_id"] = query.message.message_id
+    await query.edit_message_text(
+        text=f"{tr(lang, 'timezone_title')}\n\n{tr(lang, 'prayer_prompt_help')}\n\n{tr(lang, 'prayer_prompt_privacy')}",
+        reply_markup=personal_menu(lang),
+    )
+    location_prompt = await context.bot.send_message(
+        chat_id=query.from_user.id,
+        text=tr(lang, "share_location_now"),
+        reply_markup=location_request_keyboard(lang),
+    )
+    context.user_data["timezone_location_prompt_id"] = location_prompt.message_id
 
 
 async def resolve_timezone_from_coords(latitude: float, longitude: float):
@@ -395,7 +419,25 @@ async def set_quiet_hours(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await rebuild_user_schedule(context)
     lang = get_lang(context)
     if context.user_data.pop("setup_flow", False):
-        await query.edit_message_text(text=tr(lang, "setup_complete"), reply_markup=personal_menu(lang))
+        prefs = await get_user_prefs(str(query.from_user.id))
+        selected = parse_selected(prefs.selected_athkar if prefs else None)
+        names = "، ".join(selected_names(selected, lang)) or tr(lang, "empty_athkar")
+        schedule = {
+            "every_5_min": tr(lang, "interval_5"),
+            "every_30_min": tr(lang, "interval_30"),
+            "hourly": tr(lang, "interval_60"),
+            "goal_per_day": tr(lang, "daily_goal_summary").replace("{count}", str(prefs.daily_goal_count or 100)),
+            "custom_interval": tr(lang, "custom_interval_summary").replace("{minutes}", str(prefs.custom_frequency_minutes or 30)),
+        }.get(prefs.frequency if prefs else "every_30_min", tr(lang, "interval_30"))
+        quiet = tr(lang, f"quiet_{prefs.quiet_hours_preset or 'normal'}") if prefs else tr(lang, "quiet_normal")
+        text_value = (
+            f"{tr(lang, 'setup_ready_title')}\n\n"
+            f"{tr(lang, 'setup_ready_intro')}\n\n"
+            f"• {tr(lang, 'field_athkar')}: {names}\n"
+            f"• {tr(lang, 'field_schedule')}: {schedule}\n"
+            f"• {tr(lang, 'cfg_quiet_hours')}: {quiet}"
+        )
+        await query.edit_message_text(text=text_value, reply_markup=setup_complete_menu(lang))
     else:
         await query.edit_message_text(text=tr(lang, "saved"), reply_markup=personal_menu(lang))
 
@@ -404,11 +446,7 @@ async def begin_timezone_setup(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     await query.answer()
     lang = get_lang(context)
-    context.user_data["awaiting_timezone_setup"] = True
-    context.user_data["timezone_main_message_id"] = query.message.message_id
-    await query.edit_message_text(text=f"{tr(lang, 'timezone_title')}\n\n{tr(lang, 'prayer_prompt_help')}\n\n{tr(lang, 'prayer_prompt_privacy')}", reply_markup=personal_menu(lang))
-    location_prompt = await context.bot.send_message(chat_id=query.from_user.id, text=tr(lang, "share_location_now"), reply_markup=location_request_keyboard(lang))
-    context.user_data["timezone_location_prompt_id"] = location_prompt.message_id
+    await present_timezone_setup(query, context, lang)
 
 
 async def set_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -520,15 +558,16 @@ async def handle_location_input(update: Update, context: ContextTypes.DEFAULT_TY
 
     prayer_setup = context.user_data.pop("awaiting_prayer_setup", False)
     context.user_data.pop("awaiting_timezone_setup", None)
+    onboarding = context.user_data.pop("onboarding", False)
     # Coordinates are deliberately not persisted; location is used only to infer timezone.
-    await update_user_settings(user_id, timezone=timezone_name)
+    await update_user_settings(user_id, timezone=timezone_name, onboarding_complete=True if onboarding else None)
     await rebuild_user_schedule(context)
     if prayer_setup:
         context.user_data["awaiting_prayer_setup"] = True
         text_value = f"{tr(lang, 'prayer_timezone_detected').replace('{timezone}', timezone_name)}\n\n{tr(lang, 'prayer_prompt_city')}"
         reply_markup = personal_menu(lang)
     else:
-        text_value = f"{tr(lang, 'prayer_timezone_detected').replace('{timezone}', timezone_name)}\n\n{tr(lang, 'timezone_saved_continue')}"
+        text_value = f"{tr(lang, 'timezone_success').replace('{timezone}', timezone_name)}\n\n{tr(lang, 'choose_mode')}"
         reply_markup = home_menu(lang)
 
     main_message_id = context.user_data.pop("timezone_main_message_id", None)
@@ -537,6 +576,13 @@ async def handle_location_input(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.delete()
         if prompt_message_id:
             await context.bot.delete_message(update.effective_chat.id, prompt_message_id)
+        # Remove the one-time location keyboard without leaving a visible helper message.
+        keyboard_reset = await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=".",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+        await keyboard_reset.delete()
     except Exception:
         logger.debug("Could not delete timezone setup messages", exc_info=True)
 
