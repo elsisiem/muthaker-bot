@@ -104,7 +104,10 @@ application.add_handler(CallbackQueryHandler(set_delivery, pattern="^delivery_(r
 application.add_handler(CallbackQueryHandler(toggle_prayer, pattern="^cfg_personal_prayer$"))
 application.add_handler(CallbackQueryHandler(open_quiet_hours_menu, pattern="^cfg_personal_quiet$"))
 application.add_handler(CallbackQueryHandler(begin_timezone_setup, pattern="^cfg_personal_timezone$"))
-application.add_handler(CallbackQueryHandler(set_quiet_hours, pattern="^quiet_(normal|early|night_owl|none)$"))
+application.add_handler(CallbackQueryHandler(
+    set_quiet_hours,
+    pattern="^quiet_(normal|early|night_owl|none|fajr_isha|sleep_10_fajr|sleep_11_fajr|sleep_12_fajr|custom)$",
+))
 application.add_handler(CallbackQueryHandler(show_personal_settings, pattern="^cfg_personal_show$"))
 application.add_handler(CallbackQueryHandler(manage_targets, pattern="^targets_manage_group$|^targets_manage_channel$|^targets_manage$"))
 application.add_handler(CallbackQueryHandler(send_test_to_targets, pattern="^targets_test$"))

@@ -37,6 +37,7 @@ from .keyboards import (
     home_menu,
     interval_menu,
     language_menu,
+    locality_setup_menu,
     location_request_keyboard,
     personal_menu,
     post_prayer_anchor_menu,
@@ -206,7 +207,13 @@ async def present_timezone_setup(query, context: ContextTypes.DEFAULT_TYPE, lang
     context.user_data["timezone_main_message_id"] = query.message.message_id
     await query.edit_message_text(
         text=f"{tr(lang, 'timezone_title')}\n\n{tr(lang, 'prayer_prompt_help')}\n\n{tr(lang, 'prayer_prompt_privacy')}",
-        reply_markup=personal_menu(lang),
+        reply_markup=locality_setup_menu(
+            lang,
+            context.user_data.get(
+                "timezone_back_callback",
+                "cfg_personal_setup" if context.user_data.get("resume_after_timezone") else "home",
+            ),
+        ),
     )
     location_prompt = await context.bot.send_message(
         chat_id=query.from_user.id,
@@ -363,6 +370,7 @@ async def save_athkar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Letting Step 1 work without it keeps first-run setup light and focused.
     if context.user_data.get("setup_flow") and not (prefs and prefs.timezone_confirmed):
         context.user_data["resume_after_timezone"] = "personal_schedule"
+        context.user_data["timezone_back_callback"] = "cfg_personal_setup"
         await present_timezone_setup(query, context, lang)
         return
     await rebuild_user_schedule(context)
@@ -540,8 +548,12 @@ async def set_quiet_hours(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     prefs = await get_user_prefs(str(query.from_user.id))
     if preset in dynamic and not (prefs and prefs.prayer_city):
-        context.user_data["pending_quiet_preset"] = preset
-        await query.edit_message_text(text=tr(get_lang(context), "quiet_city_prompt"), reply_markup=quiet_hours_menu(get_lang(context)))
+        # Reuse the privacy-preserving location flow.  Sharing is the easy
+        # route; entering a city remains available in the keyboard field.
+        context.user_data["timezone_pending_quiet_preset"] = preset
+        context.user_data["resume_after_timezone"] = "personal_quiet"
+        context.user_data["timezone_back_callback"] = "cfg_personal_delivery"
+        await present_timezone_setup(query, context, get_lang(context))
         return
     start, end = dynamic.get(preset, QUIET_HOUR_PRESETS.get(preset, (23, 6)))
     await update_user_settings(str(query.from_user.id), quiet_hours_preset=preset, quiet_start_hour=start, quiet_end_hour=end, quiet_start_minute=0, quiet_end_minute=0)
@@ -793,13 +805,28 @@ async def handle_location_input(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data.pop("awaiting_timezone_setup", None)
     onboarding = context.user_data.pop("onboarding", False)
     resume_after_timezone = context.user_data.pop("resume_after_timezone", None)
-    # Coordinates are deliberately not persisted; location is used only to infer timezone.
+    context.user_data.pop("timezone_back_callback", None)
+    # Coordinates are deliberately not persisted.  A city label lets Fajr-based
+    # schedules work, while avoiding storage of the shared location itself.
+    city = await resolve_city_label_from_coords(latitude, longitude)
     await update_user_settings(
         user_id,
         timezone=timezone_name,
         timezone_confirmed=True,
+        prayer_city=city,
         onboarding_complete=True if onboarding else None,
     )
+    if resume_after_timezone == "personal_quiet":
+        preset = context.user_data.pop("timezone_pending_quiet_preset", None)
+        if preset:
+            start, end = {
+                "fajr_isha": (0, 0), "sleep_10_fajr": (22, 5),
+                "sleep_11_fajr": (23, 5), "sleep_12_fajr": (0, 5),
+            }[preset]
+            await update_user_settings(
+                user_id, quiet_hours_preset=preset, quiet_start_hour=start,
+                quiet_end_hour=end, quiet_start_minute=0, quiet_end_minute=0,
+            )
     await rebuild_user_schedule(context)
     if resume_after_timezone == "personal_setup":
         context.user_data["setup_flow"] = True
@@ -814,6 +841,11 @@ async def handle_location_input(update: Update, context: ContextTypes.DEFAULT_TY
         context.user_data["setup_flow"] = True
         text_value = f"{tr(lang, 'timezone_success').replace('{timezone}', timezone_name)}\n\n{tr(lang, 'setup_step_schedule')}"
         reply_markup = schedule_menu(lang)
+    elif resume_after_timezone == "personal_quiet":
+        prefs = await get_user_prefs(user_id)
+        context.user_data.pop("setup_flow", None)
+        text_value = setup_summary_text(prefs, lang)
+        reply_markup = setup_complete_menu(lang)
     elif prayer_setup:
         context.user_data["awaiting_prayer_setup"] = True
         text_value = f"{tr(lang, 'prayer_timezone_detected').replace('{timezone}', timezone_name)}\n\n{tr(lang, 'prayer_prompt_city')}"
@@ -1044,15 +1076,64 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if context.user_data.get("awaiting_timezone_setup"):
-        lat, lon, _ = await city_to_coords(text_value)
+        lat, lon, display = await city_to_coords(text_value)
         timezone_name = await resolve_timezone_from_coords(lat, lon) if lat is not None else None
         if not timezone_name:
             await update.message.reply_text(tr(lang, "prayer_city_failed"))
             return
+        city = display.split(",")[0] if display else None
         context.user_data.pop("awaiting_timezone_setup", None)
-        await update_user_settings(user_id, timezone=timezone_name)
+        resume_after_timezone = context.user_data.pop("resume_after_timezone", None)
+        context.user_data.pop("timezone_back_callback", None)
+        await update_user_settings(
+            user_id, timezone=timezone_name, timezone_confirmed=True, prayer_city=city,
+        )
+        if resume_after_timezone == "personal_quiet":
+            preset = context.user_data.pop("timezone_pending_quiet_preset", None)
+            if preset:
+                start, end = {
+                    "fajr_isha": (0, 0), "sleep_10_fajr": (22, 5),
+                    "sleep_11_fajr": (23, 5), "sleep_12_fajr": (0, 5),
+                }[preset]
+                await update_user_settings(
+                    user_id, quiet_hours_preset=preset, quiet_start_hour=start,
+                    quiet_end_hour=end, quiet_start_minute=0, quiet_end_minute=0,
+                )
         await rebuild_user_schedule(context)
-        await update.message.reply_text(tr(lang, 'prayer_timezone_detected').replace('{timezone}', timezone_name), reply_markup=ReplyKeyboardRemove())
+        if resume_after_timezone == "personal_schedule":
+            context.user_data["setup_flow"] = True
+            text_result = f"{tr(lang, 'timezone_success').replace('{timezone}', timezone_name)}\n\n{tr(lang, 'setup_step_schedule')}"
+            reply_markup = schedule_menu(lang)
+        elif resume_after_timezone == "personal_quiet":
+            prefs = await get_user_prefs(user_id)
+            context.user_data.pop("setup_flow", None)
+            text_result = setup_summary_text(prefs, lang)
+            reply_markup = setup_complete_menu(lang)
+        else:
+            text_result = f"{tr(lang, 'timezone_success').replace('{timezone}', timezone_name)}\n\n{tr(lang, 'choose_mode')}"
+            reply_markup = home_menu(lang)
+        main_message_id = context.user_data.pop("timezone_main_message_id", None)
+        prompt_message_id = context.user_data.pop("timezone_location_prompt_id", None)
+        try:
+            await update.message.delete()
+            if prompt_message_id:
+                await context.bot.delete_message(update.effective_chat.id, prompt_message_id)
+            keyboard_reset = await context.bot.send_message(
+                chat_id=update.effective_chat.id, text=".", reply_markup=ReplyKeyboardRemove(),
+            )
+            await keyboard_reset.delete()
+        except Exception:
+            logger.debug("Could not remove temporary typed-city messages", exc_info=True)
+        if main_message_id:
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=update.effective_chat.id, message_id=main_message_id,
+                    text=text_result, reply_markup=reply_markup,
+                )
+                return
+            except BadRequest:
+                logger.debug("Could not update typed-city timezone message", exc_info=True)
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=text_result, reply_markup=reply_markup)
         return
 
     if context.user_data.get("awaiting_prayer_setup"):
