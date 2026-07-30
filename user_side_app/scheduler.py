@@ -21,6 +21,11 @@ def set_application(app):
     bot_application = app
 
 
+def get_application():
+    """Return the live Telegram application after startup wiring completes."""
+    return bot_application
+
+
 async def start_user_reminder_scheduler():
     if not reminder_scheduler.running:
         reminder_scheduler.start()
