@@ -44,6 +44,8 @@ def personal_menu(lang: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(tr(lang, "cfg_schedule"), callback_data="cfg_personal_schedule")],
         [InlineKeyboardButton(tr(lang, "cfg_delivery"), callback_data="cfg_personal_delivery")],
         [InlineKeyboardButton(tr(lang, "cfg_prayer"), callback_data="cfg_personal_prayer")],
+        [InlineKeyboardButton(tr(lang, "cfg_quiet_hours"), callback_data="cfg_personal_quiet")],
+        [InlineKeyboardButton(tr(lang, "cfg_timezone"), callback_data="cfg_personal_timezone")],
         [InlineKeyboardButton(tr(lang, "show_settings"), callback_data="cfg_personal_show")],
         persistent_language_row(lang),
         [InlineKeyboardButton(tr(lang, "back"), callback_data="home")],
@@ -138,6 +140,17 @@ def delivery_menu(lang: str) -> InlineKeyboardMarkup:
     rows.append(persistent_language_row(lang))
     rows.append([InlineKeyboardButton(tr(lang, "back"), callback_data="mode_personal")])
     return InlineKeyboardMarkup(rows)
+
+
+def quiet_hours_menu(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(tr(lang, "quiet_normal"), callback_data="quiet_normal")],
+        [InlineKeyboardButton(tr(lang, "quiet_early"), callback_data="quiet_early")],
+        [InlineKeyboardButton(tr(lang, "quiet_night_owl"), callback_data="quiet_night_owl")],
+        [InlineKeyboardButton(tr(lang, "quiet_none"), callback_data="quiet_none")],
+        persistent_language_row(lang),
+        [InlineKeyboardButton(tr(lang, "back"), callback_data="mode_personal")],
+    ])
 
 
 def location_request_keyboard(lang: str) -> ReplyKeyboardMarkup:

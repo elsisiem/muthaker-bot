@@ -27,6 +27,9 @@ class UserPreferences(Base):
     prayer_athkar_enabled = Column(Boolean, default=False)
     prayer_city = Column(String, nullable=True)
     timezone = Column(String, default="Africa/Cairo")
+    quiet_hours_preset = Column(String, default="normal")
+    quiet_start_hour = Column(Integer, default=23)
+    quiet_end_hour = Column(Integer, default=6)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -56,6 +59,9 @@ async def init_db():
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS prayer_athkar_enabled BOOLEAN DEFAULT FALSE"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS prayer_city VARCHAR"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS timezone VARCHAR DEFAULT 'Africa/Cairo'"))
+        await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS quiet_hours_preset VARCHAR DEFAULT 'normal'"))
+        await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS quiet_start_hour INTEGER DEFAULT 23"))
+        await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS quiet_end_hour INTEGER DEFAULT 6"))
 
 
 async def get_user_prefs(telegram_id: str) -> UserPreferences | None:
@@ -99,6 +105,9 @@ async def update_user_settings(
     prayer_athkar_enabled: bool | None = None,
     prayer_city: str | None = None,
     timezone: str | None = None,
+    quiet_hours_preset: str | None = None,
+    quiet_start_hour: int | None = None,
+    quiet_end_hour: int | None = None,
 ):
     async with async_session() as session:
         result = await session.execute(select(UserPreferences).where(UserPreferences.telegram_id == telegram_id))
@@ -122,6 +131,12 @@ async def update_user_settings(
             row.prayer_city = prayer_city
         if timezone is not None:
             row.timezone = timezone
+        if quiet_hours_preset is not None:
+            row.quiet_hours_preset = quiet_hours_preset
+        if quiet_start_hour is not None:
+            row.quiet_start_hour = quiet_start_hour
+        if quiet_end_hour is not None:
+            row.quiet_end_hour = quiet_end_hour
 
         row.updated_at = datetime.utcnow()
         await session.commit()
