@@ -719,6 +719,49 @@ _COMMUNITY_TEXTS: dict[str, dict[str, str]] = {
 for _lang, _values in _COMMUNITY_TEXTS.items():
     TEXTS[_lang].update(_values)
 
+_POST_TEXTS: dict[str, dict[str, str]] = {
+    "ar": {
+        "mode_community": "مجموعاتي وقنواتي", "add_group": "إضافة مجموعة", "add_channel": "إضافة قناة",
+        "community_morning": "أذكار الصباح", "community_night": "أذكار المساء", "community_monday": "صيام الإثنين", "community_thursday": "صيام الخميس",
+        "community_prayer_times": "عرض مواقيت الصلاة", "community_change_city": "تحديد المدينة", "community_other_posts": "منشورات أخرى",
+        "community_city_prompt": "اكتب اسم المدينة كبديل عند الحاجة.",
+        "community_location_prompt": "شارك موقعك لتحديد مدينة هذه الجهة والمنطقة الزمنية تلقائياً. لا نحفظ موقعك أو إحداثياته؛ نستخدمه مرة واحدة لاستخراج مواقيت الصلاة. ويمكنك كتابة اسم المدينة بدلاً من ذلك.",
+        "post_add_message": "إضافة رسالة", "post_add_image": "إضافة صورة", "post_add_personal_athkar": "نشر أذكاري الشخصية",
+        "post_message": "رسالة", "post_photo": "صورة", "post_personal_athkar": "أذكاري الشخصية", "delete": "حذف",
+        "post_prompt_message": "أرسل الآن نص الرسالة التي تريد نشرها.", "post_prompt_image": "أرسل الآن الصورة، ويمكنك إضافة تعليق معها.",
+        "post_schedule_title": "متى تريد نشر هذا المحتوى؟", "post_schedule_clock": "وقت محدد كل يوم", "post_schedule_prayer": "ربطه بوقت صلاة", "post_schedule_interval": "كل عدد من الدقائق",
+        "post_prompt_clock": "اكتب الوقت بصيغة 24 ساعة، مثل 08:30. الأرقام العربية مقبولة.", "post_prompt_interval": "اكتب عدد الدقائق بين كل إرسال (من 5 إلى 1440).",
+        "post_invalid_time": "أدخل وقتاً صحيحاً مثل 08:30.", "post_saved": "تم حفظ المنشور وجدولته.", "post_none": "لا توجد منشورات أخرى لهذه الجهة بعد.",
+        "prayer_fajr": "الفجر", "prayer_dhuhr": "الظهر", "prayer_asr": "العصر", "prayer_maghrib": "المغرب", "prayer_isha": "العشاء",
+        "post_personal_missing": "أعدّ أذكارك الشخصية أولاً، ثم يمكنك نشرها هنا.",
+    },
+    "en": {
+        "mode_community": "My groups & channels", "add_group": "Add group", "add_channel": "Add channel",
+        "community_morning": "Morning Athkar", "community_night": "Evening Athkar", "community_monday": "Monday fasting", "community_thursday": "Thursday fasting",
+        "community_prayer_times": "View prayer times", "community_change_city": "Set city", "community_other_posts": "Other posts",
+        "community_city_prompt": "Type the city name as a fallback.",
+        "community_location_prompt": "Share your location to set this community's city and time zone automatically. We do not save your location or coordinates; they are used once for prayer times. You can type a city instead.",
+        "post_add_message": "Add message", "post_add_image": "Add image", "post_add_personal_athkar": "Post my personal Athkar",
+        "post_message": "Message", "post_photo": "Image", "post_personal_athkar": "My personal Athkar", "delete": "Delete",
+        "post_prompt_message": "Send the message text you want to post now.", "post_prompt_image": "Send the image now; you may include a caption.",
+        "post_schedule_title": "When should this be posted?", "post_schedule_clock": "Specific time every day", "post_schedule_prayer": "Anchor to a prayer time", "post_schedule_interval": "Every number of minutes",
+        "post_prompt_clock": "Type a 24-hour time, for example 08:30. Arabic numerals are accepted.", "post_prompt_interval": "Type the minutes between posts (5–1440).",
+        "post_invalid_time": "Enter a valid time such as 08:30.", "post_saved": "The post and its schedule are saved.", "post_none": "There are no other posts for this community yet.",
+        "prayer_fajr": "Fajr", "prayer_dhuhr": "Dhuhr", "prayer_asr": "Asr", "prayer_maghrib": "Maghrib", "prayer_isha": "Isha", "post_personal_missing": "Set up your personal Athkar first, then you can post them here.",
+    },
+    "es": {
+        "mode_community": "Mis grupos y canales", "add_group": "Añadir grupo", "add_channel": "Añadir canal", "community_morning": "Adhkar matutino", "community_night": "Adhkar nocturno", "community_monday": "Ayuno del lunes", "community_thursday": "Ayuno del jueves", "community_prayer_times": "Ver horarios", "community_change_city": "Configurar ciudad", "community_other_posts": "Otras publicaciones", "community_city_prompt": "Escribe la ciudad como alternativa.", "community_location_prompt": "Comparte tu ubicación para configurar automáticamente la ciudad y zona horaria. No guardamos tu ubicación ni coordenadas; puedes escribir una ciudad.", "post_add_message": "Añadir mensaje", "post_add_image": "Añadir imagen", "post_add_personal_athkar": "Publicar mis adhkar", "post_message": "Mensaje", "post_photo": "Imagen", "post_personal_athkar": "Mis adhkar", "delete": "Eliminar", "post_prompt_message": "Envía ahora el texto a publicar.", "post_prompt_image": "Envía ahora la imagen; puedes incluir un pie.", "post_schedule_title": "¿Cuándo publicar?", "post_schedule_clock": "Hora diaria", "post_schedule_prayer": "Vincular a oración", "post_schedule_interval": "Cada cierto número de minutos", "post_prompt_clock": "Escribe una hora como 08:30.", "post_prompt_interval": "Escribe los minutos entre publicaciones (5–1440).", "post_invalid_time": "Introduce una hora válida como 08:30.", "post_saved": "La publicación y su horario están guardados.", "post_none": "Aún no hay otras publicaciones.", "prayer_fajr": "Fajr", "prayer_dhuhr": "Dhuhr", "prayer_asr": "Asr", "prayer_maghrib": "Maghrib", "prayer_isha": "Isha", "post_personal_missing": "Configura primero tus adhkar personales.",
+    },
+    "fr": {
+        "mode_community": "Mes groupes et canaux", "add_group": "Ajouter un groupe", "add_channel": "Ajouter un canal", "community_morning": "Adhkâr du matin", "community_night": "Adhkâr du soir", "community_monday": "Jeûne du lundi", "community_thursday": "Jeûne du jeudi", "community_prayer_times": "Voir les horaires", "community_change_city": "Définir la ville", "community_other_posts": "Autres publications", "community_city_prompt": "Saisissez la ville si nécessaire.", "community_location_prompt": "Partagez votre position pour définir automatiquement la ville et le fuseau horaire. Nous ne conservons ni position ni coordonnées ; vous pouvez saisir une ville.", "post_add_message": "Ajouter un message", "post_add_image": "Ajouter une image", "post_add_personal_athkar": "Publier mes adhkâr", "post_message": "Message", "post_photo": "Image", "post_personal_athkar": "Mes adhkâr", "delete": "Supprimer", "post_prompt_message": "Envoyez maintenant le texte à publier.", "post_prompt_image": "Envoyez l'image maintenant ; une légende est possible.", "post_schedule_title": "Quand publier ?", "post_schedule_clock": "Heure quotidienne", "post_schedule_prayer": "Lier à une prière", "post_schedule_interval": "Toutes les X minutes", "post_prompt_clock": "Saisissez une heure comme 08:30.", "post_prompt_interval": "Saisissez les minutes entre les publications (5–1440).", "post_invalid_time": "Saisissez une heure valide comme 08:30.", "post_saved": "La publication et son horaire sont enregistrés.", "post_none": "Aucune autre publication pour l'instant.", "prayer_fajr": "Fajr", "prayer_dhuhr": "Dhuhr", "prayer_asr": "Asr", "prayer_maghrib": "Maghrib", "prayer_isha": "Isha", "post_personal_missing": "Configurez d'abord vos adhkâr personnels.",
+    },
+    "tr": {
+        "mode_community": "Gruplarım ve kanallarım", "add_group": "Grup ekle", "add_channel": "Kanal ekle", "community_morning": "Sabah zikri", "community_night": "Akşam zikri", "community_monday": "Pazartesi orucu", "community_thursday": "Perşembe orucu", "community_prayer_times": "Vakitleri gör", "community_change_city": "Şehri ayarla", "community_other_posts": "Diğer paylaşımlar", "community_city_prompt": "Gerekirse şehir adını yazın.", "community_location_prompt": "Şehri ve saat dilimini otomatik ayarlamak için konumunuzu paylaşın. Konumunuzu veya koordinatları saklamıyoruz; şehir yazabilirsiniz.", "post_add_message": "Mesaj ekle", "post_add_image": "Görsel ekle", "post_add_personal_athkar": "Kişisel zikirlerimi paylaş", "post_message": "Mesaj", "post_photo": "Görsel", "post_personal_athkar": "Kişisel zikirlerim", "delete": "Sil", "post_prompt_message": "Şimdi yayınlanacak metni gönderin.", "post_prompt_image": "Şimdi görseli gönderin; açıklama ekleyebilirsiniz.", "post_schedule_title": "Ne zaman yayınlansın?", "post_schedule_clock": "Her gün belirli saat", "post_schedule_prayer": "Namaz vaktine bağla", "post_schedule_interval": "Her X dakikada", "post_prompt_clock": "08:30 gibi bir saat yazın.", "post_prompt_interval": "Yayınlar arasındaki dakika sayısını yazın (5–1440).", "post_invalid_time": "08:30 gibi geçerli bir saat girin.", "post_saved": "Yayın ve planı kaydedildi.", "post_none": "Henüz başka yayın yok.", "prayer_fajr": "Fajr", "prayer_dhuhr": "Öğle", "prayer_asr": "İkindi", "prayer_maghrib": "Akşam", "prayer_isha": "Yatsı", "post_personal_missing": "Önce kişisel zikirlerinizi ayarlayın.",
+    },
+}
+for _lang, _values in _POST_TEXTS.items():
+    TEXTS[_lang].update(_values)
+
 
 def normalize_lang(lang: str | None, fallback: str = DEFAULT_LANG) -> str:
     if lang in TEXTS:

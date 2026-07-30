@@ -6,13 +6,20 @@ mixing their schedules or sending a post twice after a restart.
 """
 
 import logging
+import json
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import aiohttp
 import pytz
 
-from .db import list_schedulable_targets, update_target_settings
+from .db import (
+    get_user_prefs,
+    list_active_community_posts,
+    list_schedulable_targets,
+    mark_community_post_sent,
+    update_target_settings,
+)
 from .scheduler import get_application
 
 logger = logging.getLogger(__name__)
@@ -30,6 +37,13 @@ FALLBACK_TEXT = {
     "thursday": "🍃 تذكير بصيام يوم الخميس",
 }
 _timings_cache: dict[tuple[str, str, int], dict | None] = {}
+_geocode_cache: dict[str, tuple[float, float] | None] = {}
+PERSONAL_ATHKAR_TEXT = {
+    "hizb": "لا إله إلا الله وحده لا شريك له، له الملك وله الحمد وهو على كل شيء قدير.",
+    "baaqiyat": "سبحان الله، والحمد لله، ولا إله إلا الله، والله أكبر.",
+    "istighfar": "أستغفر الله العظيم وأتوب إليه.",
+    "salat": "اللهم صل وسلم وبارك على محمد.",
+}
 
 
 def _timezone(timezone_name: str | None):
@@ -39,16 +53,54 @@ def _timezone(timezone_name: str | None):
         return pytz.timezone("Africa/Cairo")
 
 
-async def fetch_prayer_times(city: str, target_date, method: int = 3) -> dict | None:
-    """Fetch one day's timings and cache them for this running process."""
-    key = (city.casefold(), target_date.isoformat(), method)
+async def geocode_city(city: str) -> tuple[float, float] | None:
+    """Coordinate lookup for legacy targets created before coordinates were stored."""
+    key = city.casefold()
+    if key in _geocode_cache:
+        return _geocode_cache[key]
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                "https://nominatim.openstreetmap.org/search",
+                params={"q": city, "format": "jsonv2", "limit": 1},
+                headers={"User-Agent": "muthaker-bot/1.0"},
+                timeout=15,
+            ) as response:
+                data = await response.json() if response.status == 200 else []
+                result = (float(data[0]["lat"]), float(data[0]["lon"])) if data else None
+                _geocode_cache[key] = result
+                return result
+    except Exception:
+        logger.exception("Could not geocode community city %s", city)
+        return None
+
+
+async def fetch_prayer_times(
+    city: str,
+    target_date,
+    method: int = 3,
+    latitude: float | str | None = None,
+    longitude: float | str | None = None,
+) -> dict | None:
+    """Fetch a day's timings from coordinates, falling back to a city lookup."""
+    try:
+        coordinates = (float(latitude), float(longitude)) if latitude is not None and longitude is not None else await geocode_city(city)
+    except (TypeError, ValueError):
+        coordinates = await geocode_city(city)
+    location_key = f"{coordinates[0]:.5f},{coordinates[1]:.5f}" if coordinates else city.casefold()
+    key = (location_key, target_date.isoformat(), method)
     if key in _timings_cache:
         return _timings_cache[key]
 
     url = f"https://api.aladhan.com/v1/timings/{target_date.strftime('%d-%m-%Y')}"
+    params = {"method": method}
+    if coordinates:
+        params.update({"latitude": coordinates[0], "longitude": coordinates[1]})
+    else:
+        params["city"] = city
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, params={"city": city, "method": method}, timeout=15) as response:
+            async with session.get(url, params=params, timeout=15) as response:
                 if response.status != 200:
                     logger.warning("Prayer API returned %s for %s", response.status, city)
                     _timings_cache[key] = None
@@ -127,3 +179,62 @@ async def dispatch_community_posts():
             await _dispatch_if_due(target, kind="monday", run_at=isha + timedelta(minutes=30), history_field="last_monday_sent_date", history_date=date_key, now=now)
         if isha and now.weekday() == 2 and target.thursday_fasting_enabled:
             await _dispatch_if_due(target, kind="thursday", run_at=isha + timedelta(minutes=30), history_field="last_thursday_sent_date", history_date=date_key, now=now)
+
+    target_index = {(target.owner_telegram_id, target.chat_id): target for target in targets}
+    for post in await list_active_community_posts():
+        target = target_index.get((post.owner_telegram_id, post.target_chat_id))
+        if not target:
+            continue
+        now = datetime.now(_timezone(target.timezone))
+        timings = await fetch_prayer_times(target.city, now.date(), target.prayer_method or 3)
+        await _dispatch_custom_post(post, target, now, timings)
+
+
+async def _send_custom_post(post, target) -> bool:
+    application = get_application()
+    if not application:
+        return False
+    try:
+        if post.content_type == "photo" and post.photo_file_id:
+            await application.bot.send_photo(chat_id=int(target.chat_id), photo=post.photo_file_id, caption=post.caption or None)
+        elif post.content_type == "personal_athkar":
+            prefs = await get_user_prefs(post.owner_telegram_id)
+            selected = json.loads(prefs.selected_athkar or "[]") if prefs else []
+            content = [PERSONAL_ATHKAR_TEXT[item] for item in selected if item in PERSONAL_ATHKAR_TEXT]
+            if not content:
+                logger.warning("Custom personal-athkar post %s has no selected athkar", post.id)
+                return False
+            await application.bot.send_message(chat_id=int(target.chat_id), text="\n\n".join(content if prefs.delivery_mode == "batch" else content[:1]))
+        elif post.text_content:
+            await application.bot.send_message(chat_id=int(target.chat_id), text=post.text_content)
+        else:
+            return False
+        return True
+    except Exception:
+        logger.exception("Could not send custom community post %s", post.id)
+        return False
+
+
+async def _dispatch_custom_post(post, target, now, timings) -> None:
+    due = False
+    sent_key = None
+    if post.schedule_type == "interval" and post.interval_minutes:
+        current_utc = datetime.utcnow()
+        due = post.last_sent_at is None or current_utc >= post.last_sent_at + timedelta(minutes=post.interval_minutes)
+        if due and await _send_custom_post(post, target):
+            await mark_community_post_sent(post.id, sent_at=current_utc)
+        return
+    if post.schedule_type == "clock" and post.time_of_day:
+        try:
+            hour, minute = map(int, post.time_of_day.split(":"))
+            run_at = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            sent_key = f"{now.date().isoformat()}:{post.time_of_day}"
+            due = post.last_sent_key != sent_key and run_at <= now < run_at + timedelta(minutes=3)
+        except ValueError:
+            logger.warning("Invalid clock time for custom post %s", post.id)
+    elif post.schedule_type == "prayer" and post.prayer_name and timings:
+        run_at = prayer_datetime(now.date(), post.prayer_name, timings, target.timezone)
+        sent_key = f"{now.date().isoformat()}:{post.prayer_name}:{post.prayer_offset_minutes or 0}"
+        due = bool(run_at and post.last_sent_key != sent_key and run_at + timedelta(minutes=post.prayer_offset_minutes or 0) <= now < run_at + timedelta(minutes=(post.prayer_offset_minutes or 0) + 3))
+    if due and await _send_custom_post(post, target):
+        await mark_community_post_sent(post.id, sent_key=sent_key, sent_at=datetime.utcnow())
