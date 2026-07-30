@@ -782,10 +782,11 @@ _PERSONAL_FLOW_TEXTS: dict[str, dict[str, str]] = {
         "save": "✅ حفظ", "settings_title": "إعداداتك", "field_delivery": "طريقة الإرسال", "field_plan": "الوتيرة", "field_sleep": "ساعات النوم",
         "setup_progress_1": "اكتملت الخطوة ١ من ٤", "setup_progress_2": "اكتملت الخطوة ٢ من ٤", "setup_progress_3": "اكتملت الخطوة ٣ من ٤",
         "setup_choice_athkar": "الأذكار: {value}", "setup_choice_schedule": "الوتيرة: {value}", "setup_choice_delivery": "طريقة الإرسال: {value}",
-        "setup_timezone_selected": "التوقيت المحلي: {timezone}", "setup_prayer_times": "مواقيت الصلاة في {city}: الفجر {fajr} • العشاء {isha}",
+        "setup_timezone_selected": "التوقيت المحلي: {timezone}", "setup_prayer_times": "أوقات الفجر والعشاء في {city}: الفجر {fajr} • العشاء {isha}",
+        "morning_evening_schedule": "🌅 أذكار الصباح: بعد الفجر بـ ٣٠ دقيقة\n🌙 أذكار المساء: بعد العصر بـ ٣٠ دقيقة",
     },
     "en": {
-        "setup_reminders": "General Athkar", "athkar_menu_title": "Step 1 of 4 — choose your general Athkar.", "choose_all": "Add all", "clear_all": "Clear all", "save_continue": "✅ Save", "close": "✖️ Close", "back": "⬅️ Back", "cfg_timezone": "⏰ Local time", "lang_button": "🌐 Language", "show_settings": "⚙️ View settings", "setup_step_schedule": "Step 2 of 4 — choose your pace.", "strategy_menu_title": "Step 2 of 4 — choose your pace.", "strategy_interval": "Timed pace (every few minutes or hours)", "strategy_goal": "Daily goal (a set daily count)", "goal_menu_title": "Is this goal for all Athkar together or for each one?", "goal_total": "One goal for all Athkar", "goal_each": "Same goal for each Athkar", "goal_advanced": "Set each Athkar's goal", "goal_scope_total_title": "Choose total daily messages for all Athkar.", "goal_scope_each_title": "Choose daily sends for each Athkar.", "advanced_goal_title": "Set {name}'s daily goal ({position}/{total}).", "setup_step_delivery": "Step 3 of 4 — choose delivery.", "delivery_menu_title": "Step 3 of 4 — choose delivery.", "delivery_rotating": "Rotating", "delivery_batch": "Send together", "setup_step_quiet": "Step 4 of 4 — choose sleep hours.", "quiet_hours_title": "Step 4 of 4 — when should messages pause?", "quiet_none": "No sleep hours", "quiet_fajr_isha": "Fajr to Isha", "quiet_sleep_10_fajr": "10 PM to Fajr", "quiet_sleep_11_fajr": "11 PM to Fajr", "quiet_sleep_12_fajr": "Midnight to Fajr", "quiet_custom": "Custom time", "quiet_city_prompt": "To resume accurately at Fajr, type your city. We save only city and time zone.", "quiet_custom_prompt": "Type sleep and resume time as HH:MM-HH:MM, for example 22:00-05:00.", "quiet_custom_invalid": "Enter a valid time such as 22:00-05:00.", "setup_ready_title": "Good news", "setup_ready_intro": "We will send the selected Athkar at a suitable pace.", "field_athkar": "Athkar", "field_schedule": "Pace", "cfg_quiet_hours": "Sleep hours", "edit_setup": "Edit", "start_over": "Start over", "daily_goal_summary": "{count} times a day", "daily_goal_each_summary": "Each Athkar: {count} times a day", "custom_interval_summary": "Every {minutes} minutes", "goal_50": "50 times", "field_sleep": "Sleep hours", "setup_progress_1": "Step 1 of 4 complete", "setup_progress_2": "Step 2 of 4 complete", "setup_progress_3": "Step 3 of 4 complete", "setup_choice_athkar": "Athkar: {value}", "setup_choice_schedule": "Pace: {value}", "setup_choice_delivery": "Delivery: {value}", "setup_timezone_selected": "Local time: {timezone}", "setup_prayer_times": "Prayer times in {city}: Fajr {fajr} • Isha {isha}",
+        "setup_reminders": "General Athkar", "athkar_menu_title": "Step 1 of 4 — choose your general Athkar.", "choose_all": "Add all", "clear_all": "Clear all", "save_continue": "✅ Save", "close": "✖️ Close", "back": "⬅️ Back", "cfg_timezone": "⏰ Local time", "lang_button": "🌐 Language", "show_settings": "⚙️ View settings", "setup_step_schedule": "Step 2 of 4 — choose your pace.", "strategy_menu_title": "Step 2 of 4 — choose your pace.", "strategy_interval": "Timed pace (every few minutes or hours)", "strategy_goal": "Daily goal (a set daily count)", "goal_menu_title": "Is this goal for all Athkar together or for each one?", "goal_total": "One goal for all Athkar", "goal_each": "Same goal for each Athkar", "goal_advanced": "Set each Athkar's goal", "goal_scope_total_title": "Choose total daily messages for all Athkar.", "goal_scope_each_title": "Choose daily sends for each Athkar.", "advanced_goal_title": "Set {name}'s daily goal ({position}/{total}).", "setup_step_delivery": "Step 3 of 4 — choose delivery.", "delivery_menu_title": "Step 3 of 4 — choose delivery.", "delivery_rotating": "Rotating", "delivery_batch": "Send together", "setup_step_quiet": "Step 4 of 4 — choose sleep hours.", "quiet_hours_title": "Step 4 of 4 — when should messages pause?", "quiet_none": "No sleep hours", "quiet_fajr_isha": "Fajr to Isha", "quiet_sleep_10_fajr": "10 PM to Fajr", "quiet_sleep_11_fajr": "11 PM to Fajr", "quiet_sleep_12_fajr": "Midnight to Fajr", "quiet_custom": "Custom time", "quiet_city_prompt": "To resume accurately at Fajr, type your city. We save only city and time zone.", "quiet_custom_prompt": "Type sleep and resume time as HH:MM-HH:MM, for example 22:00-05:00.", "quiet_custom_invalid": "Enter a valid time such as 22:00-05:00.", "setup_ready_title": "Good news", "setup_ready_intro": "We will send the selected Athkar at a suitable pace.", "field_athkar": "Athkar", "field_schedule": "Pace", "cfg_quiet_hours": "Sleep hours", "edit_setup": "Edit", "start_over": "Start over", "daily_goal_summary": "{count} times a day", "daily_goal_each_summary": "Each Athkar: {count} times a day", "custom_interval_summary": "Every {minutes} minutes", "goal_50": "50 times", "field_sleep": "Sleep hours", "setup_progress_1": "Step 1 of 4 complete", "setup_progress_2": "Step 2 of 4 complete", "setup_progress_3": "Step 3 of 4 complete", "setup_choice_athkar": "Athkar: {value}", "setup_choice_schedule": "Pace: {value}", "setup_choice_delivery": "Delivery: {value}", "setup_timezone_selected": "Local time: {timezone}", "setup_prayer_times": "Fajr and Isha in {city}: Fajr {fajr} • Isha {isha}", "morning_evening_schedule": "🌅 Morning Athkar: 30 minutes after Fajr\n🌙 Evening Athkar: 30 minutes after Asr",
     },
 }
 for _lang, _values in _PERSONAL_FLOW_TEXTS.items():
@@ -813,14 +814,23 @@ _NAVIGATION_TEXTS = {
         "mode_personal": "👤 أذكاري الشخصية", "mode_community": "👥 مجموعاتي وقنواتي",
         "add_group": "➕ إضافة مجموعة", "add_channel": "➕ إضافة قناة",
         "lang_button": "🌐 اللغة", "cfg_timezone": "⏰ التوقيت المحلي",
-        "show_settings": "⚙️ عرض الإعدادات", "cfg_prayer": "أذكار الصباح والمساء",
+        "show_settings": "⚙️ عرض الإعدادات", "cfg_prayer": "أذكار الصباح والمساء", "field_prayer": "أذكار الصباح والمساء",
+        "prayer_on": "مفعّلة", "prayer_off": "غير مفعّلة",
+        "community_intro": "اختر ما تريد نشره في {target}. تُرسل أذكار الصباح والمساء بعد الفجر والعصر في مدينة الجهة.",
+        "community_prayer_times": "🕌 عرض أوقات اليوم", "community_prayer_title": "أوقات اليوم في {city} — {date}",
+        "community_prayer_missing_city": "حدد المدينة أولًا لضبط أوقات اليوم.", "community_prayer_failed": "تعذر جلب أوقات اليوم الآن. حاول مرة أخرى بعد قليل.",
+        "community_location_prompt": "شارك موقعك لتحديد مدينة هذه الجهة والتوقيت المحلي تلقائياً. لا نحفظ موقعك أو إحداثياته؛ ويمكنك كتابة اسم المدينة بدلاً من ذلك.",
         "save_continue": "✅ حفظ", "save": "✅ حفظ", "close": "✖️ إغلاق", "back": "⬅️ رجوع",
     },
     "en": {
         "mode_personal": "👤 My personal Athkar", "mode_community": "👥 My groups & channels",
         "add_group": "➕ Add group", "add_channel": "➕ Add channel",
         "lang_button": "🌐 Language", "cfg_timezone": "⏰ Local time",
-        "show_settings": "⚙️ View settings", "cfg_prayer": "Morning & evening Athkar",
+        "show_settings": "⚙️ View settings", "cfg_prayer": "Morning & evening Athkar", "field_prayer": "Morning & evening Athkar",
+        "community_intro": "Choose what to post in {target}. Morning and evening Athkar are sent after Fajr and Asr in the community's city.",
+        "community_prayer_times": "🕌 View daily times", "community_prayer_title": "Daily times in {city} — {date}",
+        "community_prayer_missing_city": "Set this community's city first to calculate daily times.", "community_prayer_failed": "Daily times could not be fetched right now. Please try again shortly.",
+        "community_location_prompt": "Share your location to set this community's city and local time automatically. We do not save your location or coordinates; you can type a city instead.",
         "save_continue": "✅ Save", "save": "✅ Save", "close": "✖️ Close", "back": "⬅️ Back",
     },
     "es": {
@@ -847,6 +857,16 @@ _NAVIGATION_TEXTS = {
 }
 for _lang, _values in _NAVIGATION_TEXTS.items():
     TEXTS[_lang].update(_values)
+
+# Keep the Arabic welcome focused on local timing without calling this feature
+# a prayer-time reminder.
+TEXTS["ar"]["choose_mode"] = (
+    "تنبيه: بعض الإعدادات تتطلب معرفة أوقاتكم المحلية لتعمل على الوجه المبتغى، "
+    "ولذلك ستجدون البوت يطلب منكم مشاركة موقعكم أو اسم مدينتكم.\n"
+    "نشهد الله أننا لا نحتفظ بإحداثيات موقعكم، ويقوم البوت بحذفها فور تحديد "
+    "التوقيت المحلي. ويُحفظ اسم المدينة فقط عند اختيار إعداد يعتمد على أوقات اليوم، "
+    "فاطمئنوا بارك الله فيكم."
+)
 
 
 def normalize_lang(lang: str | None, fallback: str = DEFAULT_LANG) -> str:
