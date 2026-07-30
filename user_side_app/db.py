@@ -30,6 +30,7 @@ class UserPreferences(Base):
     quiet_hours_preset = Column(String, default="normal")
     quiet_start_hour = Column(Integer, default=23)
     quiet_end_hour = Column(Integer, default=6)
+    onboarding_complete = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -62,6 +63,7 @@ async def init_db():
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS quiet_hours_preset VARCHAR DEFAULT 'normal'"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS quiet_start_hour INTEGER DEFAULT 23"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS quiet_end_hour INTEGER DEFAULT 6"))
+        await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS onboarding_complete BOOLEAN DEFAULT FALSE"))
 
 
 async def get_user_prefs(telegram_id: str) -> UserPreferences | None:
@@ -108,6 +110,7 @@ async def update_user_settings(
     quiet_hours_preset: str | None = None,
     quiet_start_hour: int | None = None,
     quiet_end_hour: int | None = None,
+    onboarding_complete: bool | None = None,
 ):
     async with async_session() as session:
         result = await session.execute(select(UserPreferences).where(UserPreferences.telegram_id == telegram_id))
@@ -137,6 +140,8 @@ async def update_user_settings(
             row.quiet_start_hour = quiet_start_hour
         if quiet_end_hour is not None:
             row.quiet_end_hour = quiet_end_hour
+        if onboarding_complete is not None:
+            row.onboarding_complete = onboarding_complete
 
         row.updated_at = datetime.utcnow()
         await session.commit()
