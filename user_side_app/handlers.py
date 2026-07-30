@@ -717,23 +717,77 @@ async def toggle_prayer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text=tr(lang, "prayer_disabled_done"), reply_markup=personal_menu(lang))
         return
 
-    if prefs and prefs.timezone_confirmed:
-        context.user_data["awaiting_prayer_setup"] = True
-        await query.edit_message_text(text=tr(lang, "prayer_prompt_city"), reply_markup=personal_menu(lang))
+    # A previously resolved city can enable the feature immediately.
+    if prefs and prefs.timezone and prefs.prayer_city:
+        await update_user_settings(user_id, prayer_athkar_enabled=True, timezone_confirmed=True)
+        await rebuild_user_schedule(context)
+        await query.edit_message_text(
+            text=morning_evening_ready_text(lang, prefs.prayer_city, prefs.timezone),
+            reply_markup=personal_menu(lang),
+        )
         return
 
+    # Otherwise one location share (or a typed city) resolves both local time
+    # and the city needed for the morning/evening schedule.
     context.user_data["awaiting_prayer_setup"] = True
     context.user_data["timezone_main_message_id"] = query.message.message_id
     await query.edit_message_text(
-        text=f"{tr(lang, 'prayer_prompt_title')}\n\n{tr(lang, 'prayer_prompt_help')}\n\n{tr(lang, 'prayer_prompt_privacy')}\n\n{tr(lang, 'prayer_prompt_city')}",
-        reply_markup=personal_menu(lang),
+        text=f"{tr(lang, 'cfg_prayer')}\n\n{tr(lang, 'prayer_prompt_help')}\n\n{tr(lang, 'prayer_prompt_privacy')}\n\n{tr(lang, 'prayer_prompt_city')}",
+        reply_markup=locality_setup_menu(lang, "mode_personal"),
     )
     location_prompt = await context.bot.send_message(
         chat_id=query.from_user.id,
-        text=f"{tr(lang, 'prayer_prompt_title')}\n\n{tr(lang, 'prayer_prompt_help')}",
+        text=f"{tr(lang, 'cfg_prayer')}\n\n{tr(lang, 'prayer_prompt_help')}",
         reply_markup=location_request_keyboard(lang),
     )
     context.user_data["timezone_location_prompt_id"] = location_prompt.message_id
+
+
+def morning_evening_ready_text(lang: str, city: str, timezone_name: str) -> str:
+    return (
+        f"{tr(lang, 'prayer_enabled_done')}\n"
+        f"✅ {tr(lang, 'setup_timezone_selected').replace('{timezone}', timezone_name)}\n"
+        f"📍 {tr(lang, 'prayer_city_saved').replace('{city}', city)}\n\n"
+        f"{tr(lang, 'morning_evening_schedule')}"
+    )
+
+
+async def complete_morning_evening_setup(update: Update, context: ContextTypes.DEFAULT_TYPE, *, city: str, timezone_name: str):
+    """Persist one resolved city and activate both morning and evening sends."""
+    lang = get_lang(context)
+    user_id = str(update.effective_user.id)
+    await update_user_settings(
+        user_id,
+        prayer_athkar_enabled=True,
+        prayer_city=city,
+        timezone=timezone_name,
+        timezone_confirmed=True,
+    )
+    await rebuild_user_schedule(context)
+    context.user_data.pop("awaiting_prayer_setup", None)
+    text_value = morning_evening_ready_text(lang, city, timezone_name)
+    main_message_id = context.user_data.pop("timezone_main_message_id", None)
+    prompt_message_id = context.user_data.pop("timezone_location_prompt_id", None)
+    try:
+        await update.message.delete()
+        if prompt_message_id:
+            await context.bot.delete_message(update.effective_chat.id, prompt_message_id)
+        keyboard_reset = await context.bot.send_message(
+            chat_id=update.effective_chat.id, text=".", reply_markup=ReplyKeyboardRemove(),
+        )
+        await keyboard_reset.delete()
+    except Exception:
+        logger.debug("Could not remove temporary morning/evening setup messages", exc_info=True)
+    if main_message_id:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id, message_id=main_message_id,
+                text=text_value, reply_markup=personal_menu(lang),
+            )
+            return
+        except BadRequest:
+            logger.debug("Could not update morning/evening setup message", exc_info=True)
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=text_value, reply_markup=personal_menu(lang))
 
 
 async def city_to_coords(city: str):
@@ -833,6 +887,16 @@ async def handle_location_input(update: Update, context: ContextTypes.DEFAULT_TY
         await complete_community_location(
             update, context, latitude=latitude, longitude=longitude,
             city=city, timezone_name=timezone_name,
+        )
+        return
+
+    if context.user_data.get("awaiting_prayer_setup"):
+        city = await resolve_city_label_from_coords(latitude, longitude)
+        if not city:
+            await update.message.reply_text(tr(lang, "prayer_city_failed"))
+            return
+        await complete_morning_evening_setup(
+            update, context, city=city, timezone_name=timezone_name,
         )
         return
 
@@ -1185,18 +1249,8 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not timezone_name:
             await update.message.reply_text(tr(lang, "prayer_city_failed"))
             return
-        await update_user_settings(
-            user_id,
-            prayer_athkar_enabled=True,
-            prayer_city=display.split(",")[0],
-            timezone=timezone_name,
-        )
-        context.user_data["awaiting_prayer_setup"] = False
-        await rebuild_user_schedule(context)
-        city_name = display.split(",")[0]
-        await update.message.reply_text(
-            f"{tr(lang, 'prayer_enabled_done')}\n{tr(lang, 'prayer_timezone_detected').replace('{timezone}', timezone_name)}\n{tr(lang, 'prayer_city_saved').replace('{city}', city_name)}",
-            reply_markup=ReplyKeyboardRemove(),
+        await complete_morning_evening_setup(
+            update, context, city=display.split(",")[0], timezone_name=timezone_name,
         )
         return
 
@@ -1260,10 +1314,10 @@ def parse_prayer_datetime(day, prayer_name: str, timings: dict, timezone_name: s
     return tz.localize(dt)
 
 
-async def send_prayer_message(telegram_id: str, kind: str):
+async def send_morning_evening_athkar(telegram_id: str, kind: str):
     application = get_application()
     if not application:
-        logger.error("Cannot send prayer athkar: Telegram application is not ready")
+        logger.error("Cannot send morning/evening athkar: Telegram application is not ready")
         return
     filename = "أذكار_الصباح.jpg" if kind == "morning" else "أذكار_المساء.jpg"
     image_path = Path(__file__).resolve().parent.parent / "الأذكار" / filename
@@ -1330,44 +1384,48 @@ async def build_jobs_for_user(user):
 
     if user.prayer_athkar_enabled and user.prayer_city:
         now = datetime.now(pytz.timezone(user.timezone or "Africa/Cairo"))
+        morning_scheduled = False
+        evening_scheduled = False
         for day in (now.date(), now.date() + timedelta(days=1)):
             timings = await fetch_prayer_times_by_city(user.prayer_city, day)
             if not timings:
                 continue
             fajr = parse_prayer_datetime(day, "Fajr", timings, user.timezone or "Africa/Cairo")
             asr = parse_prayer_datetime(day, "Asr", timings, user.timezone or "Africa/Cairo")
-            if fajr:
-                run_time = fajr + timedelta(minutes=35)
+            if fajr and not morning_scheduled:
+                run_time = fajr + timedelta(minutes=30)
                 if run_time > now:
                     reminder_scheduler.add_job(
-                        send_prayer_message,
+                        send_morning_evening_athkar,
                         trigger="date",
                         run_date=run_time,
                         args=[str(user.telegram_id), "morning"],
-                        id=f"prayer_reminder_{user.telegram_id}_morning",
+                        id=f"morning_evening_{user.telegram_id}_morning",
                         replace_existing=True,
                         misfire_grace_time=300,
                     )
-                    break
-            if asr:
+                    morning_scheduled = True
+            if asr and not evening_scheduled:
                 run_time = asr + timedelta(minutes=30)
                 if run_time > now:
                     reminder_scheduler.add_job(
-                        send_prayer_message,
+                        send_morning_evening_athkar,
                         trigger="date",
                         run_date=run_time,
                         args=[str(user.telegram_id), "evening"],
-                        id=f"prayer_reminder_{user.telegram_id}_evening",
+                        id=f"morning_evening_{user.telegram_id}_evening",
                         replace_existing=True,
                         misfire_grace_time=300,
                     )
-                    break
+                    evening_scheduled = True
+            if morning_scheduled and evening_scheduled:
+                break
 
 
 async def rebuild_user_schedule(context: ContextTypes.DEFAULT_TYPE):
     set_application(context.application)
     for job in reminder_scheduler.get_jobs():
-        if job.id.startswith("user_reminder_") or job.id.startswith("prayer_reminder_"):
+        if job.id.startswith(("user_reminder_", "prayer_reminder_", "morning_evening_")):
             reminder_scheduler.remove_job(job.id)
     users = await list_active_users()
     for user in users:
