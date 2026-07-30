@@ -802,6 +802,45 @@ _PERSONAL_FLOW_LOCALIZED = {
 for _lang, _values in _PERSONAL_FLOW_LOCALIZED.items():
     TEXTS[_lang].update(_values)
 
+# Navigation is deliberately compact and consistent.  The symbols are text
+# glyphs (rather than coloured status emoji), except for the user-requested
+# globe, clock and Telegram's familiar blue person/group identifiers.
+_NAVIGATION_TEXTS = {
+    "ar": {
+        "choose_mode": "تنبيه: بعض الإعدادات تتطلب معرفة مواقيتكم المحلية لتعمل على الوجه المبتغى، ولذلك ستجدون البوت يطلب منكم مشاركة موقعكم أو اسم مدينتكم.\nنشهد الله أننا لا نحتفظ بإحداثيات موقعكم، ويقوم البوت بحذفها فور تحديد التوقيت المحلي. ويُحفظ اسم المدينة فقط عند اختيار إعداد يعتمد على مواقيت الصلاة، فاطمئنوا بارك الله فيكم.",
+        "mode_personal": "👤 أذكاري الشخصية", "mode_community": "👥 مجموعاتي وقنواتي",
+        "add_group": "✚ إضافة مجموعة", "add_channel": "✚ إضافة قناة",
+        "lang_button": "🌐 اللغة", "cfg_timezone": "⏰ التوقيت المحلي",
+        "save_continue": "✓ حفظ", "save": "✓ حفظ", "close": "× إغلاق", "back": "◀ رجوع",
+    },
+    "en": {
+        "mode_personal": "👤 My personal Athkar", "mode_community": "👥 My groups & channels",
+        "add_group": "✚ Add group", "add_channel": "✚ Add channel",
+        "lang_button": "🌐 Language", "cfg_timezone": "⏰ Local time",
+        "save_continue": "✓ Save", "save": "✓ Save", "close": "× Close", "back": "◀ Back",
+    },
+    "es": {
+        "mode_personal": "👤 Mis adhkar personales", "mode_community": "👥 Mis grupos y canales",
+        "add_group": "✚ Añadir grupo", "add_channel": "✚ Añadir canal",
+        "lang_button": "🌐 Idioma", "cfg_timezone": "⏰ Hora local",
+        "save_continue": "✓ Guardar", "close": "× Cerrar", "back": "◀ Volver",
+    },
+    "fr": {
+        "mode_personal": "👤 Mes adhkâr personnels", "mode_community": "👥 Mes groupes et canaux",
+        "add_group": "✚ Ajouter un groupe", "add_channel": "✚ Ajouter un canal",
+        "lang_button": "🌐 Langue", "cfg_timezone": "⏰ Heure locale",
+        "save_continue": "✓ Enregistrer", "close": "× Fermer", "back": "◀ Retour",
+    },
+    "tr": {
+        "mode_personal": "👤 Kişisel zikirlerim", "mode_community": "👥 Gruplarım ve kanallarım",
+        "add_group": "✚ Grup ekle", "add_channel": "✚ Kanal ekle",
+        "lang_button": "🌐 Dil", "cfg_timezone": "⏰ Yerel saat",
+        "save_continue": "✓ Kaydet", "close": "× Kapat", "back": "◀ Geri",
+    },
+}
+for _lang, _values in _NAVIGATION_TEXTS.items():
+    TEXTS[_lang].update(_values)
+
 
 def normalize_lang(lang: str | None, fallback: str = DEFAULT_LANG) -> str:
     if lang in TEXTS:

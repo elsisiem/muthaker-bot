@@ -27,7 +27,12 @@ def settings_footer(lang: str, back_callback: str) -> list[list[InlineKeyboardBu
     return [[
         InlineKeyboardButton(tr(lang, "cfg_timezone"), callback_data="cfg_personal_timezone"),
         InlineKeyboardButton(tr(lang, "lang_button"), callback_data="open_lang_menu"),
-    ], [
+    ], *navigation_footer(lang, back_callback)]
+
+
+def navigation_footer(lang: str, back_callback: str) -> list[list[InlineKeyboardButton]]:
+    """Use only navigation controls in compact, single-purpose screens."""
+    return [[
         InlineKeyboardButton(tr(lang, "back"), callback_data=back_callback),
         InlineKeyboardButton(tr(lang, "close"), callback_data="close_home"),
     ]]
@@ -51,8 +56,15 @@ def language_menu(lang: str, show_back: bool = True) -> InlineKeyboardMarkup:
         language_row(lang)[3:],
     ]
     if show_back:
-        rows.extend(settings_footer(lang, "home"))
+        # A language picker should only show languages and a way out; repeating
+        # language/time-zone controls here is visual noise.
+        rows.extend(navigation_footer(lang, "home"))
     return InlineKeyboardMarkup(rows)
+
+
+def locality_setup_menu(lang: str, back_callback: str = "home") -> InlineKeyboardMarkup:
+    """Keep a one-time location request free of unrelated settings controls."""
+    return InlineKeyboardMarkup(navigation_footer(lang, back_callback))
 
 
 def personal_menu(lang: str) -> InlineKeyboardMarkup:
@@ -125,7 +137,7 @@ def remove_target_menu(lang: str, targets: list[tuple[str, str]]) -> InlineKeybo
 def athkar_select_menu(lang: str, items: list[tuple[str, str, bool]]) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     for athkar_id, label, selected in items:
-        prefix = "✅ " if selected else "❌ "
+        prefix = "✓ " if selected else "× "
         rows.append([InlineKeyboardButton(f"{prefix}{label}", callback_data=f"athkar_toggle_{athkar_id}")])
     rows.append([
         InlineKeyboardButton(tr(lang, "clear_all"), callback_data="athkar_clear_all"),
