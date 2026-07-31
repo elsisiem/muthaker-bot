@@ -20,6 +20,7 @@ class UserPreferences(Base):
     language = Column(String, default="ar")
     mode = Column(String, default="personal")
     selected_athkar = Column(Text, nullable=True)
+    custom_athkar = Column(Text, nullable=True)
     frequency = Column(String, default="every_30_min")
     custom_frequency_minutes = Column(Integer, nullable=True)
     daily_goal_count = Column(Integer, nullable=True)
@@ -98,6 +99,7 @@ async def init_db():
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS custom_frequency_minutes INTEGER"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS daily_goal_count INTEGER"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS daily_goal_per_athkar TEXT"))
+        await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS custom_athkar TEXT"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS delivery_mode VARCHAR DEFAULT 'rotating'"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS prayer_athkar_enabled BOOLEAN DEFAULT FALSE"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS prayer_city VARCHAR"))
@@ -157,6 +159,7 @@ async def update_user_settings(
     telegram_id: str,
     *,
     selected_athkar: str | None = None,
+    custom_athkar: str | None = None,
     frequency: str | None = None,
     custom_frequency_minutes: int | None = None,
     daily_goal_count: int | None = None,
@@ -182,6 +185,8 @@ async def update_user_settings(
 
         if selected_athkar is not None:
             row.selected_athkar = selected_athkar
+        if custom_athkar is not None:
+            row.custom_athkar = custom_athkar
         if frequency is not None:
             row.frequency = frequency
         if custom_frequency_minutes is not None or frequency == "custom_interval":
@@ -299,6 +304,38 @@ async def update_target_settings(owner_telegram_id: str, chat_id: str, **setting
         for key, value in settings.items():
             if key in allowed:
                 setattr(row, key, value)
+        await session.commit()
+        return row
+
+
+async def reset_user_preferences(telegram_id: str):
+    """Clear a user's personal setup while retaining the account record itself."""
+    async with async_session() as session:
+        result = await session.execute(select(UserPreferences).where(UserPreferences.telegram_id == telegram_id))
+        row = result.scalars().first()
+        if not row:
+            return None
+        row.language = "ar"
+        row.mode = "personal"
+        row.selected_athkar = "[]"
+        row.custom_athkar = "[]"
+        row.frequency = "every_30_min"
+        row.custom_frequency_minutes = None
+        row.daily_goal_count = None
+        row.daily_goal_per_athkar = None
+        row.delivery_mode = "sequential"
+        row.prayer_athkar_enabled = False
+        row.prayer_city = None
+        row.timezone = "Africa/Cairo"
+        row.quiet_hours_preset = "normal"
+        row.quiet_start_hour = 23
+        row.quiet_end_hour = 6
+        row.quiet_start_minute = 0
+        row.quiet_end_minute = 0
+        row.quiet_periods = None
+        row.onboarding_complete = False
+        row.timezone_confirmed = False
+        row.updated_at = datetime.utcnow()
         await session.commit()
         return row
 

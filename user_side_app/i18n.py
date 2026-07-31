@@ -887,15 +887,35 @@ TEXTS["ar"].update({
     ),
     "mode_personal": "👤 أورادي الشخصية",
     "personal_menu": "أورادي الشخصية\n\nتجد هنا ما تحتاجه لجدولة أورادك اليومية.",
+    "reset_start": "🗑️ ابدأ من جديد",
+    "reset_confirmation": "🗑️ سيُحذف إعدادك الشخصي الحالي، بما فيه أورادك الخاصة والتوقيتات التي حددتها. هل تريد البدء من جديد؟",
+    "reset_cancel": "✖️ إلغاء",
+    "reset_confirm_button": "☑️ نعم، ابدأ من جديد",
     "athkar_menu_title": "أوراد الذكر العامة\n\nالخطوة الأولى من أصل أربعة: اختر أوراد الذكر التي ترغب في تفعيلها.",
+    "add_custom_athkar": "➕ أضف وردًا خاصًا",
+    "custom_athkar_name_prompt": "أضف وردًا خاصًا\n\nاكتب اسم الورد كما تحب أن يظهر في قائمتك.",
+    "custom_athkar_name_invalid": "اكتب اسمًا للورد لا يزيد على ٨٠ حرفًا.",
+    "custom_athkar_text_prompt": "اكتب الآن النص الذي تريد أن يرسله البوت لهذا الورد.",
+    "custom_athkar_text_invalid": "اكتب نصًا صالحًا لا يزيد على ٣٥٠٠ حرف.",
+    "custom_athkar_restart": "تعذر حفظ الورد. ابدأ إضافته مرة أخرى من القائمة.",
     "save_continue": "☑️ حفظ",
     "save": "☑️ حفظ",
     "done": "☑️ تم",
     "strategy_interval": "معدل زمني (كل X دقائق أو ساعات)",
     "interval_custom": "غير ذلك",
-    "delivery_batch": "أرسلها معًا",
-    "quiet_none": "بدون ساعات نوم — لا أنام :)",
-    "quiet_custom": "تحديد وقت مخصص — دعني أحدد وحدي",
+    "goal_menu_title": "حدد أهداف أورادك",
+    "goal_total": "هدف إجمالي (يشمل جميع الأذكار)",
+    "goal_each": "هدف موحّد (أي: رقم يسري على كل نوع ذكر)",
+    "goal_advanced": "هدف متغاير (أي: كل ذكر على حدة)",
+    "delivery_sequential": "تسلسلي",
+    "delivery_random": "عشوائي",
+    "delivery_complete": "أتمم ورد الذكر ثم الذي يليه",
+    "delivery_batch": "أرسلها معًا (لا أنصح بذلك، لكن لعله يناسب أحدكم)",
+    "delivery_rotating": "تسلسلي",
+    "quiet_none": "لا أنام :)",
+    "quiet_fajr_isha": "من العشاء إلى الفجر",
+    "quiet_sleep_1_fajr": "من ١ صباحًا إلى الفجر",
+    "quiet_custom": "دعني أحدد وحدي",
     "quiet_custom_prompt": "اكتب فترة نوم واحدة أو أكثر بصيغة HH:MM-HH:MM، وافصل بينها بفاصلة. مثال: 22:00-05:00،13:00-14:00.",
     "quiet_custom_invalid": "أدخل فترة صحيحة مثل 22:00-05:00، أو عدة فترات مفصولة بفاصلة.",
     "quiet_hours_title": (
@@ -905,9 +925,9 @@ TEXTS["ar"].update({
     "setup_step_schedule": "الخطوة الثانية من أصل أربعة: اختر الوتيرة المناسبة لأورادك.",
     "setup_step_delivery": "الخطوة الثالثة من أصل أربعة: اختر طريقة الإرسال.",
     "setup_step_quiet": "الخطوة الرابعة من أصل أربعة: اختر ساعات النوم التي يتوقف فيها الإرسال.",
-    "setup_progress_1": "الخطوة الأولى من أصل أربعة مكتملة",
-    "setup_progress_2": "الخطوة الثانية من أصل أربعة مكتملة",
-    "setup_progress_3": "الخطوة الثالثة من أصل أربعة مكتملة",
+    "setup_progress_1": "اكتملت الخطوة الأولى من أصل أربعة",
+    "setup_progress_2": "اكتملت الخطوة الثانية من أصل أربعة",
+    "setup_progress_3": "اكتملت الخطوة الثالثة من أصل أربعة",
     "help_text": (
         "المساعدة\n\n"
         "• رتّب أورادك من «أورادي الشخصية».\n"
@@ -921,6 +941,23 @@ TEXTS["en"].update({
     "save_continue": "☑️ Save",
     "save": "☑️ Save",
     "done": "☑️ Done",
+    "reset_start": "🗑️ Start over",
+    "reset_confirmation": "🗑️ This deletes your personal Athkar setup, custom Athkar, and timing choices. Start over?",
+    "reset_cancel": "✖️ Cancel",
+    "reset_confirm_button": "☑️ Yes, start over",
+    "add_custom_athkar": "➕ Add a custom Athkar",
+    "custom_athkar_name_prompt": "Add a custom Athkar\n\nType the name to show in your list.",
+    "custom_athkar_name_invalid": "Enter a name of up to 80 characters.",
+    "custom_athkar_text_prompt": "Now type the text the bot should send for this Athkar.",
+    "custom_athkar_text_invalid": "Enter text of up to 3,500 characters.",
+    "custom_athkar_restart": "This Athkar could not be saved. Please add it again from the list.",
+    "delivery_sequential": "Sequential",
+    "delivery_random": "Random",
+    "delivery_complete": "Complete one Athkar, then the next",
+    "quiet_none": "I do not sleep :)",
+    "quiet_fajr_isha": "Isha to Fajr",
+    "quiet_sleep_1_fajr": "1 AM to Fajr",
+    "quiet_custom": "Let me choose",
     "help_text": (
         "Help\n\n"
         "• Schedule daily Athkar in My personal Athkar.\n"
@@ -957,6 +994,21 @@ TEXTS["tr"].update({
         "Ayarları görmek için /view_settings, değiştirmek için /edit_setting kullanın."
     ),
 })
+
+# New setup controls have complete English fallbacks for every currently
+# supported interface language until their long-form copy is localized.
+for _lang in ("es", "fr", "tr"):
+    for _key in (
+        "reset_start", "reset_confirmation", "reset_cancel", "reset_confirm_button",
+        "add_custom_athkar", "custom_athkar_name_prompt", "custom_athkar_name_invalid",
+        "custom_athkar_text_prompt", "custom_athkar_text_invalid", "custom_athkar_restart",
+        "delivery_sequential", "delivery_random", "delivery_complete", "quiet_sleep_1_fajr",
+    ):
+        TEXTS[_lang].setdefault(_key, TEXTS["en"][_key])
+
+TEXTS["es"].update({"quiet_none": "No duermo :)", "quiet_fajr_isha": "De Isha a Fajr", "quiet_custom": "Déjame elegir"})
+TEXTS["fr"].update({"quiet_none": "Je ne dors pas :)", "quiet_fajr_isha": "D'Isha à Fajr", "quiet_custom": "Je choisis moi-même"})
+TEXTS["tr"].update({"quiet_none": "Uyumam :)", "quiet_fajr_isha": "Isha'dan Fajr'a", "quiet_custom": "Kendim seçeyim"})
 
 # A selected item is always shown with the requested black checkbox, including
 # older compatibility strings retained above for users with an existing flow.

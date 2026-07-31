@@ -24,10 +24,16 @@ def persistent_language_row(lang: str) -> list[InlineKeyboardButton]:
 
 
 def settings_footer(lang: str, back_callback: str) -> list[list[InlineKeyboardButton]]:
-    return [[
-        InlineKeyboardButton(tr(lang, "lang_button"), callback_data="open_lang_menu"),
-        InlineKeyboardButton(tr(lang, "cfg_timezone"), callback_data="cfg_personal_timezone"),
-    ], *navigation_footer(lang, back_callback)]
+    # Navigation/actions stay directly above the permanent local controls.
+    # Telegram renders this row left-to-right, so time is left and language is
+    # right in the Arabic interface as requested.
+    return [
+        *navigation_footer(lang, back_callback),
+        [
+            InlineKeyboardButton(tr(lang, "cfg_timezone"), callback_data="cfg_personal_timezone"),
+            InlineKeyboardButton(tr(lang, "lang_button"), callback_data="open_lang_menu"),
+        ],
+    ]
 
 
 def navigation_footer(lang: str, back_callback: str) -> list[list[InlineKeyboardButton]]:
@@ -42,6 +48,7 @@ def home_menu(lang: str) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(tr(lang, "mode_personal"), callback_data="mode_personal")],
         [InlineKeyboardButton(tr(lang, "mode_community"), callback_data="mode_community")],
+        [InlineKeyboardButton(tr(lang, "reset_start"), callback_data="reset_confirm")],
         [
             InlineKeyboardButton(tr(lang, "cfg_timezone"), callback_data="cfg_personal_timezone"),
             InlineKeyboardButton(tr(lang, "lang_button"), callback_data="open_lang_menu"),
@@ -71,12 +78,12 @@ def personal_menu(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(tr(lang, "setup_reminders"), callback_data="cfg_personal_setup")],
         [InlineKeyboardButton(tr(lang, "cfg_prayer"), callback_data="cfg_personal_prayer")],
-        [
-            InlineKeyboardButton(tr(lang, "lang_button"), callback_data="open_lang_menu"),
-            InlineKeyboardButton(tr(lang, "show_settings"), callback_data="cfg_personal_show"),
-            InlineKeyboardButton(tr(lang, "cfg_timezone"), callback_data="cfg_personal_timezone"),
-        ],
         *navigation_footer(lang, "home"),
+        [
+            InlineKeyboardButton(tr(lang, "cfg_timezone"), callback_data="cfg_personal_timezone"),
+            InlineKeyboardButton(tr(lang, "show_settings"), callback_data="cfg_personal_show"),
+            InlineKeyboardButton(tr(lang, "lang_button"), callback_data="open_lang_menu"),
+        ],
     ])
 
 
@@ -156,10 +163,7 @@ def athkar_select_menu(lang: str, items: list[tuple[str, str, bool]]) -> InlineK
         InlineKeyboardButton(tr(lang, "clear_all"), callback_data="athkar_clear_all"),
         InlineKeyboardButton(tr(lang, "choose_all"), callback_data="athkar_select_all"),
     ])
-    rows.append([
-        InlineKeyboardButton(tr(lang, "lang_button"), callback_data="open_lang_menu"),
-        InlineKeyboardButton(tr(lang, "cfg_timezone"), callback_data="cfg_personal_timezone"),
-    ])
+    rows.append([InlineKeyboardButton(tr(lang, "add_custom_athkar"), callback_data="athkar_custom_add")])
     # Saving is an action within this step, so it belongs between back and
     # close rather than in a detached row above the navigation.
     rows.append([
@@ -167,7 +171,15 @@ def athkar_select_menu(lang: str, items: list[tuple[str, str, bool]]) -> InlineK
         InlineKeyboardButton(tr(lang, "save_continue"), callback_data="athkar_save"),
         InlineKeyboardButton(tr(lang, "close"), callback_data="close_home"),
     ])
+    rows.append([
+        InlineKeyboardButton(tr(lang, "cfg_timezone"), callback_data="cfg_personal_timezone"),
+        InlineKeyboardButton(tr(lang, "lang_button"), callback_data="open_lang_menu"),
+    ])
     return InlineKeyboardMarkup(rows)
+
+
+def custom_athkar_prompt_menu(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(settings_footer(lang, "cfg_personal_setup"))
 
 
 def schedule_menu(lang: str) -> InlineKeyboardMarkup:
@@ -222,11 +234,20 @@ def advanced_goal_menu(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
-def delivery_menu(lang: str) -> InlineKeyboardMarkup:
-    rows = [
-        [InlineKeyboardButton(tr(lang, "delivery_rotating"), callback_data="delivery_rotating")],
-        [InlineKeyboardButton(tr(lang, "delivery_batch"), callback_data="delivery_batch")],
-    ]
+def delivery_menu(lang: str, is_daily_goal: bool = False) -> InlineKeyboardMarkup:
+    if is_daily_goal:
+        rows = [
+            [InlineKeyboardButton(tr(lang, "delivery_complete"), callback_data="delivery_complete")],
+            [InlineKeyboardButton(tr(lang, "delivery_random"), callback_data="delivery_random")],
+        ]
+    else:
+        rows = [
+            [
+                InlineKeyboardButton(tr(lang, "delivery_random"), callback_data="delivery_random"),
+                InlineKeyboardButton(tr(lang, "delivery_sequential"), callback_data="delivery_sequential"),
+            ],
+            [InlineKeyboardButton(tr(lang, "delivery_batch"), callback_data="delivery_batch")],
+        ]
     rows.extend(settings_footer(lang, "cfg_personal_schedule"))
     return InlineKeyboardMarkup(rows)
 
@@ -235,9 +256,14 @@ def quiet_hours_menu(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(tr(lang, "quiet_none"), callback_data="quiet_none")],
         [InlineKeyboardButton(tr(lang, "quiet_fajr_isha"), callback_data="quiet_fajr_isha")],
-        [InlineKeyboardButton(tr(lang, "quiet_sleep_10_fajr"), callback_data="quiet_sleep_10_fajr")],
-        [InlineKeyboardButton(tr(lang, "quiet_sleep_11_fajr"), callback_data="quiet_sleep_11_fajr")],
-        [InlineKeyboardButton(tr(lang, "quiet_sleep_12_fajr"), callback_data="quiet_sleep_12_fajr")],
+        [
+            InlineKeyboardButton(tr(lang, "quiet_sleep_10_fajr"), callback_data="quiet_sleep_10_fajr"),
+            InlineKeyboardButton(tr(lang, "quiet_sleep_11_fajr"), callback_data="quiet_sleep_11_fajr"),
+        ],
+        [
+            InlineKeyboardButton(tr(lang, "quiet_sleep_12_fajr"), callback_data="quiet_sleep_12_fajr"),
+            InlineKeyboardButton(tr(lang, "quiet_sleep_1_fajr"), callback_data="quiet_sleep_1_fajr"),
+        ],
         [InlineKeyboardButton(tr(lang, "quiet_custom"), callback_data="quiet_custom")],
         *settings_footer(lang, "cfg_personal_delivery"),
     ])
@@ -248,12 +274,25 @@ def setup_complete_menu(lang: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(tr(lang, "done"), callback_data="close_home")],
         [
             InlineKeyboardButton(tr(lang, "edit_setup"), callback_data="cfg_personal_setup"),
-            InlineKeyboardButton(tr(lang, "start_over"), callback_data="cfg_personal_setup"),
+            InlineKeyboardButton(tr(lang, "start_over"), callback_data="reset_confirm"),
         ],
         [
-            InlineKeyboardButton(tr(lang, "lang_button"), callback_data="open_lang_menu"),
-            InlineKeyboardButton(tr(lang, "show_settings"), callback_data="cfg_personal_show"),
             InlineKeyboardButton(tr(lang, "cfg_timezone"), callback_data="cfg_personal_timezone"),
+            InlineKeyboardButton(tr(lang, "show_settings"), callback_data="cfg_personal_show"),
+            InlineKeyboardButton(tr(lang, "lang_button"), callback_data="open_lang_menu"),
+        ],
+    ])
+
+
+def reset_confirmation_menu(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(tr(lang, "reset_cancel"), callback_data="home"),
+            InlineKeyboardButton(tr(lang, "reset_confirm_button"), callback_data="reset_execute"),
+        ],
+        [
+            InlineKeyboardButton(tr(lang, "cfg_timezone"), callback_data="cfg_personal_timezone"),
+            InlineKeyboardButton(tr(lang, "lang_button"), callback_data="open_lang_menu"),
         ],
     ])
 
