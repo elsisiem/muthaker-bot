@@ -44,6 +44,8 @@ from .keyboards import (
     language_menu,
     locality_setup_menu,
     location_request_keyboard,
+    morning_evening_menu,
+    morning_evening_offset_menu,
     personal_menu,
     post_prayer_anchor_menu,
     post_schedule_menu,
@@ -65,7 +67,7 @@ from .community_dispatcher import fetch_prayer_times
 from services.timezone_service import detect_timezone_from_location
 
 logger = logging.getLogger(__name__)
-UI_BUILD = "user-side-v203"
+UI_BUILD = "user-side-v204"
 CAIRO_TZ = pytz.timezone("Africa/Cairo")
 QUIET_HOUR_PRESETS = {"normal": (23, 6), "early": (21, 5), "night_owl": (1, 9), "none": (0, 0)}
 
@@ -255,6 +257,17 @@ def delivery_label(prefs, lang: str) -> str:
     if mode == "complete":
         return tr(lang, "delivery_complete")
     return tr(lang, "delivery_sequential")
+
+
+def is_editing_setup(context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """True only for the explicit edit route from the completed summary."""
+    return bool(context.user_data.get("editing_setup"))
+
+
+def localized_number(value: int, lang: str) -> str:
+    if lang == "ar":
+        return str(value).translate(str.maketrans("0123456789", "٠١٢٣٤٥٦٧٨٩"))
+    return str(value)
 
 
 def frequency_to_seconds(frequency: str, custom_minutes: int | None) -> int:
@@ -494,15 +507,52 @@ async def begin_personal_setup(update: Update, context: ContextTypes.DEFAULT_TYP
         "custom_athkar_name", "custom_athkar_prompt_id",
     ):
         context.user_data.pop(key, None)
+    context.user_data.pop("editing_setup", None)
+    context.user_data.pop("draft_selected", None)
+    context.user_data.pop("setup_back_callback", None)
     context.user_data["setup_flow"] = True
     await open_personal_athkar(update, context)
 
 
-async def open_personal_athkar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def begin_edit_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Enter the same four-step flow while retaining a visible save/Done exit."""
     query = update.callback_query
     await query.answer()
+    context.user_data["setup_flow"] = True
+    context.user_data["editing_setup"] = True
+    context.user_data.pop("draft_selected", None)
+    await open_personal_athkar(update, context, answered=True)
+
+
+async def finish_edit_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Save the current edit state even when the user stops before step four."""
+    query = update.callback_query
+    await query.answer()
+    if not query.from_user:
+        return
+    user_id = str(query.from_user.id)
+    if "draft_selected" in context.user_data:
+        await update_user_settings(user_id, selected_athkar=json.dumps(context.user_data["draft_selected"]))
+    await rebuild_user_schedule(context)
+    prefs = await get_user_prefs(user_id)
+    for key in (
+        "setup_flow", "editing_setup", "draft_selected",
+        "awaiting_custom_athkar_name", "awaiting_custom_athkar_text", "custom_athkar_name",
+        "awaiting_custom_interval", "awaiting_custom_goal_scope", "awaiting_advanced_goal",
+        "awaiting_custom_quiet_hours", "setup_back_callback",
+    ):
+        context.user_data.pop(key, None)
+    await query.edit_message_text(text=setup_summary_text(prefs, get_lang(context)), reply_markup=setup_complete_menu(get_lang(context)))
+
+
+async def open_personal_athkar(update: Update, context: ContextTypes.DEFAULT_TYPE, *, answered: bool = False):
+    query = update.callback_query
+    if not answered:
+        await query.answer()
     lang = get_lang(context)
     user_id = str(query.from_user.id)
+    for key in ("awaiting_custom_athkar_name", "awaiting_custom_athkar_text", "custom_athkar_name"):
+        context.user_data.pop(key, None)
     prefs = await get_user_prefs(user_id)
     if "draft_selected" not in context.user_data:
         context.user_data["draft_selected"] = parse_selected(prefs.selected_athkar if prefs else None)
@@ -510,6 +560,7 @@ async def open_personal_athkar(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def render_athkar_selection(query, context: ContextTypes.DEFAULT_TYPE, lang: str):
+    context.user_data["setup_back_callback"] = "cfg_personal_athkar"
     context.user_data["athkar_menu_message_id"] = query.message.message_id
     context.user_data["athkar_menu_chat_id"] = query.message.chat_id
     await render_athkar_selection_card(
@@ -518,6 +569,7 @@ async def render_athkar_selection(query, context: ContextTypes.DEFAULT_TYPE, lan
         query.message.message_id,
         str(query.from_user.id),
         lang,
+        editing=is_editing_setup(context),
     )
 
 
@@ -527,6 +579,8 @@ async def render_athkar_selection_card(
     message_id: int,
     user_id: str,
     lang: str,
+    *,
+    editing: bool = False,
 ):
     """Render the persistent setup card after a toggle or a custom addition."""
     selected = context.user_data.get("draft_selected", [])
@@ -538,7 +592,7 @@ async def render_athkar_selection_card(
             chat_id=chat_id,
             message_id=message_id,
             text=tr(lang, "athkar_menu_title"),
-            reply_markup=athkar_select_menu(lang, items),
+            reply_markup=athkar_select_menu(lang, items, editing=editing),
         )
     except BadRequest as exc:
         if "Message is not modified" not in str(exc):
@@ -577,7 +631,7 @@ async def begin_custom_athkar(update: Update, context: ContextTypes.DEFAULT_TYPE
     context.user_data["athkar_menu_chat_id"] = query.message.chat_id
     await query.edit_message_text(
         text=tr(lang, "custom_athkar_name_prompt"),
-        reply_markup=custom_athkar_prompt_menu(lang),
+        reply_markup=custom_athkar_prompt_menu(lang, editing=is_editing_setup(context)),
     )
 
 
@@ -598,13 +652,13 @@ async def save_athkar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         prefs = await get_user_prefs(user_id)
         key = "en" if lang == "en" else "ar"
         items = [(x["id"], x[key], False) for x in all_athkar_options(prefs)]
-        await query.edit_message_text(text=tr(lang, "need_athkar"), reply_markup=athkar_select_menu(lang, items))
+        await query.edit_message_text(text=tr(lang, "need_athkar"), reply_markup=athkar_select_menu(lang, items, editing=is_editing_setup(context)))
         return
     await update_user_settings(user_id, selected_athkar=json.dumps(selected))
     prefs = await get_user_prefs(user_id)
     await rebuild_user_schedule(context)
     if context.user_data.get("setup_flow"):
-        await query.edit_message_text(text=setup_schedule_prompt(prefs, lang), reply_markup=schedule_menu(lang))
+        await query.edit_message_text(text=setup_schedule_prompt(prefs, lang), reply_markup=schedule_menu(lang, editing=is_editing_setup(context)))
         return
     await query.edit_message_text(text=tr(lang, "athkar_saved"), reply_markup=personal_menu(lang))
 
@@ -613,9 +667,27 @@ async def open_schedule_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
     lang = get_lang(context)
+    context.user_data["setup_back_callback"] = "cfg_personal_schedule"
     prefs = await get_user_prefs(str(query.from_user.id))
     text_value = setup_schedule_prompt(prefs, lang) if context.user_data.get("setup_flow") else tr(lang, "strategy_menu_title")
-    await query.edit_message_text(text=text_value, reply_markup=schedule_menu(lang))
+    await query.edit_message_text(text=text_value, reply_markup=schedule_menu(lang, editing=is_editing_setup(context)))
+
+
+async def open_goal_scope_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Return from a numeric goal choice to its immediate parent screen."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(context)
+    context.user_data["setup_back_callback"] = "cfg_personal_goal_scope"
+    prefs = await get_user_prefs(str(query.from_user.id))
+    text_value = (
+        setup_schedule_context(prefs, lang, tr(lang, "goal_menu_title"))
+        if context.user_data.get("setup_flow") else tr(lang, "goal_menu_title")
+    )
+    await query.edit_message_text(
+        text=text_value,
+        reply_markup=goal_scope_menu(lang, editing=is_editing_setup(context)),
+    )
 
 
 async def set_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -626,28 +698,31 @@ async def set_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prefs = await get_user_prefs(user_id)
 
     if query.data == "schedule_strategy_interval":
+        context.user_data["setup_back_callback"] = "cfg_personal_schedule"
         text_value = (
             setup_schedule_context(prefs, lang, tr(lang, "schedule_menu_title"))
             if context.user_data.get("setup_flow") else tr(lang, "schedule_menu_title")
         )
-        await query.edit_message_text(text=text_value, reply_markup=interval_menu(lang))
+        await query.edit_message_text(text=text_value, reply_markup=interval_menu(lang, editing=is_editing_setup(context)))
         return
 
     if query.data == "schedule_strategy_goal":
+        context.user_data["setup_back_callback"] = "cfg_personal_schedule"
         text_value = (
             setup_schedule_context(prefs, lang, tr(lang, "goal_menu_title"))
             if context.user_data.get("setup_flow") else tr(lang, "goal_menu_title")
         )
-        await query.edit_message_text(text=text_value, reply_markup=goal_scope_menu(lang))
+        await query.edit_message_text(text=text_value, reply_markup=goal_scope_menu(lang, editing=is_editing_setup(context)))
         return
 
     if query.data == "schedule_custom":
+        context.user_data["setup_back_callback"] = "cfg_personal_schedule"
         context.user_data["awaiting_custom_interval"] = True
         text_value = (
             setup_schedule_context(prefs, lang, tr(lang, "prompt_custom_interval"))
             if context.user_data.get("setup_flow") else tr(lang, "prompt_custom_interval")
         )
-        await query.edit_message_text(text=text_value, reply_markup=interval_menu(lang))
+        await query.edit_message_text(text=text_value, reply_markup=interval_menu(lang, editing=is_editing_setup(context)))
         return
 
     mapping = {
@@ -665,6 +740,7 @@ async def choose_goal_scope(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     lang = get_lang(context)
+    context.user_data["setup_back_callback"] = "cfg_personal_goal_scope"
     scope = query.data.removeprefix("goal_scope_")
     prefs = await get_user_prefs(str(query.from_user.id))
     if scope == "total":
@@ -672,19 +748,19 @@ async def choose_goal_scope(update: Update, context: ContextTypes.DEFAULT_TYPE):
             setup_schedule_context(prefs, lang, tr(lang, "goal_scope_total_title"))
             if context.user_data.get("setup_flow") else tr(lang, "goal_scope_total_title")
         )
-        await query.edit_message_text(text=text_value, reply_markup=goal_menu(lang, "total"))
+        await query.edit_message_text(text=text_value, reply_markup=goal_menu(lang, "total", editing=is_editing_setup(context)))
         return
     if scope == "each":
         text_value = (
             setup_schedule_context(prefs, lang, tr(lang, "goal_scope_each_title"))
             if context.user_data.get("setup_flow") else tr(lang, "goal_scope_each_title")
         )
-        await query.edit_message_text(text=text_value, reply_markup=goal_menu(lang, "each"))
+        await query.edit_message_text(text=text_value, reply_markup=goal_menu(lang, "each", editing=is_editing_setup(context)))
         return
     if scope == "advanced":
         selected = parse_selected(prefs.selected_athkar if prefs else None)
         if not selected:
-            await query.edit_message_text(text=tr(lang, "need_athkar"), reply_markup=athkar_select_menu(lang, []))
+            await query.edit_message_text(text=tr(lang, "need_athkar"), reply_markup=athkar_select_menu(lang, [], editing=is_editing_setup(context)))
             return
         context.user_data["advanced_goal_ids"] = selected
         context.user_data["advanced_goal_values"] = {}
@@ -693,6 +769,7 @@ async def choose_goal_scope(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def render_advanced_goal(query, context: ContextTypes.DEFAULT_TYPE, lang: str):
+    context.user_data["setup_back_callback"] = "cfg_personal_goal_scope"
     selected = context.user_data.get("advanced_goal_ids", [])
     index = context.user_data.get("advanced_goal_index", 0)
     if index >= len(selected):
@@ -704,7 +781,7 @@ async def render_advanced_goal(query, context: ContextTypes.DEFAULT_TYPE, lang: 
     name = athkar["ar" if lang == "ar" else "en"] if athkar else selected[index]
     prompt = tr(lang, "advanced_goal_title").replace("{name}", name).replace("{position}", str(index + 1)).replace("{total}", str(len(selected)))
     text_value = setup_schedule_context(prefs, lang, prompt) if context.user_data.get("setup_flow") else prompt
-    await query.edit_message_text(text=text_value, reply_markup=advanced_goal_menu(lang))
+    await query.edit_message_text(text=text_value, reply_markup=advanced_goal_menu(lang, editing=is_editing_setup(context)))
 
 
 async def set_goal_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -720,7 +797,7 @@ async def set_goal_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
             setup_schedule_context(prefs, lang, tr(lang, "prompt_custom_goal"))
             if context.user_data.get("setup_flow") else tr(lang, "prompt_custom_goal")
         )
-        await query.edit_message_text(text=text_value, reply_markup=goal_menu(lang, scope))
+        await query.edit_message_text(text=text_value, reply_markup=goal_menu(lang, scope, editing=is_editing_setup(context)))
         return
     await finish_goal_setup(query, context, lang, scope, int(value))
 
@@ -737,7 +814,7 @@ async def set_advanced_goal(update: Update, context: ContextTypes.DEFAULT_TYPE):
             setup_schedule_context(prefs, lang, tr(lang, "prompt_custom_goal"))
             if context.user_data.get("setup_flow") else tr(lang, "prompt_custom_goal")
         )
-        await query.edit_message_text(text=text_value, reply_markup=advanced_goal_menu(lang))
+        await query.edit_message_text(text=text_value, reply_markup=advanced_goal_menu(lang, editing=is_editing_setup(context)))
         return
     await apply_advanced_goal_value(query, context, lang, int(raw))
 
@@ -780,7 +857,7 @@ async def continue_after_schedule(query, context: ContextTypes.DEFAULT_TYPE, lan
         prefs = await get_user_prefs(str(query.from_user.id))
         await query.edit_message_text(
             text=setup_delivery_prompt(prefs, lang),
-            reply_markup=delivery_menu(lang, is_daily_goal(prefs)),
+            reply_markup=delivery_menu(lang, is_daily_goal(prefs), editing=is_editing_setup(context)),
         )
     else:
         await query.edit_message_text(text=tr(lang, "saved"), reply_markup=personal_menu(lang))
@@ -790,18 +867,20 @@ async def open_delivery_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
     lang = get_lang(context)
+    context.user_data["setup_back_callback"] = "cfg_personal_delivery"
     prefs = await get_user_prefs(str(query.from_user.id))
     text_value = setup_delivery_prompt(prefs, lang) if context.user_data.get("setup_flow") else tr(lang, "delivery_menu_title")
-    await query.edit_message_text(text=text_value, reply_markup=delivery_menu(lang, is_daily_goal(prefs)))
+    await query.edit_message_text(text=text_value, reply_markup=delivery_menu(lang, is_daily_goal(prefs), editing=is_editing_setup(context)))
 
 
 async def open_quiet_hours_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     lang = get_lang(context)
+    context.user_data["setup_back_callback"] = "cfg_personal_quiet"
     prefs = await get_user_prefs(str(query.from_user.id))
     text_value = setup_quiet_prompt(prefs, lang) if context.user_data.get("setup_flow") else tr(lang, "quiet_hours_title")
-    await query.edit_message_text(text=text_value, reply_markup=quiet_hours_menu(lang))
+    await query.edit_message_text(text=text_value, reply_markup=quiet_hours_menu(lang, editing=is_editing_setup(context)))
 
 
 async def set_quiet_hours(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -816,7 +895,7 @@ async def set_quiet_hours(update: Update, context: ContextTypes.DEFAULT_TYPE):
             setup_quiet_context(prefs, lang, tr(lang, "quiet_custom_prompt"))
             if context.user_data.get("setup_flow") else tr(lang, "quiet_custom_prompt")
         )
-        await query.edit_message_text(text=text_value, reply_markup=quiet_hours_menu(lang))
+        await query.edit_message_text(text=text_value, reply_markup=quiet_hours_menu(lang, editing=is_editing_setup(context)))
         return
     dynamic = {
         "fajr_isha": (0, 0), "sleep_10_fajr": (22, 5),
@@ -839,6 +918,9 @@ async def set_quiet_hours(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = get_lang(context)
     if context.user_data.pop("setup_flow", False):
         prefs = await get_user_prefs(str(query.from_user.id))
+        context.user_data.pop("editing_setup", None)
+        context.user_data.pop("draft_selected", None)
+        context.user_data.pop("setup_back_callback", None)
         text_value = setup_summary_text(prefs, lang)
         await query.edit_message_text(text=text_value, reply_markup=setup_complete_menu(lang))
     else:
@@ -851,8 +933,9 @@ def setup_summary_text(prefs, lang: str) -> str:
     schedule = frequency_label(prefs, lang)
     quiet = quiet_hours_label(prefs, lang)
     return (
-        f"🎉 {tr(lang, 'setup_ready_title')}\n"
-        f"{tr(lang, 'setup_ready_intro')}\n\n"
+        f"{tr(lang, 'setup_summary_greeting')}\n"
+        f"{tr(lang, 'setup_summary_intro')}\n\n"
+        f"{tr(lang, 'setup_summary_note')}\n\n"
         f"📿 {tr(lang, 'field_athkar')}: {names}\n"
         f"⏳ {tr(lang, 'field_schedule')}: {schedule}\n"
         f"📨 {tr(lang, 'field_delivery')}: {delivery_label(prefs, lang)}\n"
@@ -882,6 +965,10 @@ async def begin_timezone_setup(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     await query.answer()
     lang = get_lang(context)
+    context.user_data["timezone_back_callback"] = context.user_data.get(
+        "setup_back_callback",
+        "mode_personal" if context.user_data.get("active_mode") == "personal" else "home",
+    )
     await present_timezone_setup(query, context, lang)
 
 
@@ -902,7 +989,10 @@ async def set_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await rebuild_user_schedule(context)
     if context.user_data.get("setup_flow"):
         prefs = await get_user_prefs(user_id)
-        await query.edit_message_text(text=setup_quiet_prompt(prefs, lang), reply_markup=quiet_hours_menu(lang))
+        await query.edit_message_text(
+            text=setup_quiet_prompt(prefs, lang),
+            reply_markup=quiet_hours_menu(lang, editing=is_editing_setup(context)),
+        )
     else:
         await query.edit_message_text(text=tr(lang, "saved"), reply_markup=personal_menu(lang))
 
@@ -991,25 +1081,25 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def toggle_prayer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Open morning/evening configuration; never flip it silently on tap."""
     query = update.callback_query
     await query.answer()
     lang = get_lang(context)
     user_id = str(query.from_user.id)
     prefs = await get_user_prefs(user_id)
 
-    if prefs and prefs.prayer_athkar_enabled:
-        await update_user_settings(user_id, prayer_athkar_enabled=False)
-        await rebuild_user_schedule(context)
-        await query.edit_message_text(text=tr(lang, "prayer_disabled_done"), reply_markup=personal_menu(lang))
-        return
-
-    # A previously resolved city can enable the feature immediately.
+    # Existing local timing can reopen a real settings panel straight away.
     if prefs and prefs.timezone and prefs.prayer_city:
         await update_user_settings(user_id, prayer_athkar_enabled=True, timezone_confirmed=True)
         await rebuild_user_schedule(context)
+        prefs = await get_user_prefs(user_id)
         await query.edit_message_text(
-            text=morning_evening_ready_text(lang, prefs.prayer_city, prefs.timezone),
-            reply_markup=personal_menu(lang),
+            text=morning_evening_ready_text(
+                lang, prefs.prayer_city, prefs.timezone,
+                prefs.morning_athkar_offset_minutes or 30,
+                prefs.evening_athkar_offset_minutes or 30,
+            ),
+            reply_markup=morning_evening_menu(lang, prefs),
         )
         return
 
@@ -1029,17 +1119,35 @@ async def toggle_prayer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["timezone_location_prompt_id"] = location_prompt.message_id
 
 
-def morning_evening_ready_text(lang: str, city: str, timezone_name: str) -> str:
+def morning_evening_ready_text(
+    lang: str,
+    city: str,
+    timezone_name: str,
+    morning_minutes: int = 30,
+    evening_minutes: int = 30,
+) -> str:
+    """Use one reassuring, readable confirmation after every saved change."""
+    if lang == "ar":
+        # The text is deliberately kept in the requested Arabic form.  The
+        # controls beneath it open each timing separately.
+        return (
+            "فعِّلت أذكار الصباح والمساء.\n"
+            f"☑️ التوقيت المحلي: {timezone_name}\n"
+            f"📍 المدينة: {city}\n\n"
+            f"🌅 أذكار الصباح: بعد الفجر بـ {localized_number(morning_minutes, lang)} دقيقة\n"
+            f"🌙 أذكار المساء: بعد العصر بـ {localized_number(evening_minutes, lang)} دقيقة"
+        )
     return (
-        f"{tr(lang, 'prayer_enabled_done')}\n"
+        "Morning and evening Athkar are enabled.\n"
         f"☑️ {tr(lang, 'setup_timezone_selected').replace('{timezone}', timezone_name)}\n"
         f"📍 {tr(lang, 'prayer_city_saved').replace('{city}', city)}\n\n"
-        f"{tr(lang, 'morning_evening_schedule')}"
+        f"🌅 Morning Athkar: {morning_minutes} minutes after Fajr\n"
+        f"🌙 Evening Athkar: {evening_minutes} minutes after Asr"
     )
 
 
 async def complete_morning_evening_setup(update: Update, context: ContextTypes.DEFAULT_TYPE, *, city: str, timezone_name: str):
-    """Persist one resolved city and activate both morning and evening sends."""
+    """Persist one resolved city and open the editable morning/evening card."""
     lang = get_lang(context)
     user_id = str(update.effective_user.id)
     await update_user_settings(
@@ -1048,10 +1156,17 @@ async def complete_morning_evening_setup(update: Update, context: ContextTypes.D
         prayer_city=city,
         timezone=timezone_name,
         timezone_confirmed=True,
+        morning_athkar_offset_minutes=30,
+        evening_athkar_offset_minutes=30,
     )
     await rebuild_user_schedule(context)
+    prefs = await get_user_prefs(user_id)
     context.user_data.pop("awaiting_prayer_setup", None)
-    text_value = morning_evening_ready_text(lang, city, timezone_name)
+    text_value = morning_evening_ready_text(
+        lang, city, timezone_name,
+        prefs.morning_athkar_offset_minutes or 30,
+        prefs.evening_athkar_offset_minutes or 30,
+    )
     main_message_id = context.user_data.pop("timezone_main_message_id", None)
     prompt_message_id = context.user_data.pop("timezone_location_prompt_id", None)
     try:
@@ -1068,12 +1183,63 @@ async def complete_morning_evening_setup(update: Update, context: ContextTypes.D
         try:
             await context.bot.edit_message_text(
                 chat_id=update.effective_chat.id, message_id=main_message_id,
-                text=text_value, reply_markup=personal_menu(lang),
+                text=text_value, reply_markup=morning_evening_menu(lang, prefs),
             )
             return
         except BadRequest:
             logger.debug("Could not update morning/evening setup message", exc_info=True)
-    await context.bot.send_message(chat_id=update.effective_chat.id, text=text_value, reply_markup=personal_menu(lang))
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=text_value, reply_markup=morning_evening_menu(lang, prefs))
+
+
+async def choose_morning_evening_offset(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(context)
+    kind = query.data.removeprefix("morning_evening_choose_")
+    if kind not in {"morning", "evening"}:
+        return
+    context.user_data["morning_evening_offset_kind"] = kind
+    anchor = tr(lang, "morning_anchor" if kind == "morning" else "evening_anchor")
+    text_value = (
+        f"{tr(lang, 'morning_evening_title')}\n\n"
+        f"{tr(lang, 'morning_evening_offset_prompt').replace('{anchor}', anchor)}"
+    )
+    await query.edit_message_text(text=text_value, reply_markup=morning_evening_offset_menu(lang))
+
+
+async def set_morning_evening_offset(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(context)
+    kind = context.user_data.get("morning_evening_offset_kind")
+    if kind not in {"morning", "evening"} or not query.from_user:
+        return
+    raw_value = query.data.removeprefix("morning_evening_offset_")
+    anchor = tr(lang, "morning_anchor" if kind == "morning" else "evening_anchor")
+    if raw_value == "custom":
+        context.user_data["awaiting_morning_evening_offset"] = kind
+        context.user_data["morning_evening_card_chat_id"] = query.message.chat_id
+        context.user_data["morning_evening_card_message_id"] = query.message.message_id
+        await query.edit_message_text(
+            text=tr(lang, "offset_custom_prompt").replace("{anchor}", anchor),
+            reply_markup=morning_evening_offset_menu(lang),
+        )
+        return
+    if raw_value not in {"10", "20", "30"}:
+        return
+    field = "morning_athkar_offset_minutes" if kind == "morning" else "evening_athkar_offset_minutes"
+    await update_user_settings(str(query.from_user.id), prayer_athkar_enabled=True, **{field: int(raw_value)})
+    await rebuild_user_schedule(context)
+    prefs = await get_user_prefs(str(query.from_user.id))
+    context.user_data.pop("morning_evening_offset_kind", None)
+    await query.edit_message_text(
+        text=morning_evening_ready_text(
+            lang, prefs.prayer_city, prefs.timezone,
+            prefs.morning_athkar_offset_minutes or 30,
+            prefs.evening_athkar_offset_minutes or 30,
+        ),
+        reply_markup=morning_evening_menu(lang, prefs),
+    )
 
 
 async def city_to_coords(city: str):
@@ -1221,12 +1387,12 @@ async def handle_location_input(update: Update, context: ContextTypes.DEFAULT_TY
         key = "en" if lang == "en" else "ar"
         items = [(x["id"], x[key], x["id"] in selected) for x in all_athkar_options(prefs)]
         text_value = f"{tr(lang, 'timezone_success').replace('{timezone}', timezone_name)}\n\n{tr(lang, 'setup_step_athkar')}"
-        reply_markup = athkar_select_menu(lang, items)
+        reply_markup = athkar_select_menu(lang, items, editing=is_editing_setup(context))
     elif resume_after_timezone == "personal_schedule":
         context.user_data["setup_flow"] = True
         prefs = await get_user_prefs(user_id)
         text_value = f"☑️ {tr(lang, 'setup_timezone_selected').replace('{timezone}', timezone_name)}\n\n{setup_schedule_prompt(prefs, lang)}"
-        reply_markup = schedule_menu(lang)
+        reply_markup = schedule_menu(lang, editing=is_editing_setup(context))
     elif resume_after_timezone == "personal_quiet":
         prefs = await get_user_prefs(user_id)
         context.user_data.pop("setup_flow", None)
@@ -1288,7 +1454,7 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["awaiting_custom_athkar_text"] = True
         prompt = await update.message.reply_text(
             tr(lang, "custom_athkar_text_prompt"),
-            reply_markup=custom_athkar_prompt_menu(lang),
+            reply_markup=custom_athkar_prompt_menu(lang, editing=is_editing_setup(context)),
         )
         context.user_data["custom_athkar_prompt_id"] = prompt.message_id
         return
@@ -1327,14 +1493,56 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         menu_id = context.user_data.get("athkar_menu_message_id")
         menu_chat_id = context.user_data.get("athkar_menu_chat_id", update.effective_chat.id)
         if menu_id:
-            await render_athkar_selection_card(context, menu_chat_id, menu_id, user_id, lang)
+            await render_athkar_selection_card(
+                context, menu_chat_id, menu_id, user_id, lang,
+                editing=is_editing_setup(context),
+            )
         else:
             fresh_prefs = await get_user_prefs(user_id)
             items = [
                 (item["id"], item["ar" if lang == "ar" else "en"], item["id"] in selected)
                 for item in all_athkar_options(fresh_prefs)
             ]
-            await update.message.reply_text(tr(lang, "athkar_menu_title"), reply_markup=athkar_select_menu(lang, items))
+            await update.message.reply_text(
+                tr(lang, "athkar_menu_title"),
+                reply_markup=athkar_select_menu(lang, items, editing=is_editing_setup(context)),
+            )
+        return
+
+    if context.user_data.get("awaiting_morning_evening_offset"):
+        kind = context.user_data.get("awaiting_morning_evening_offset")
+        if kind not in {"morning", "evening"} or not numeric_value.isdigit():
+            await update.message.reply_text(tr(lang, "invalid_number"))
+            return
+        minutes = int(numeric_value)
+        if not 1 <= minutes <= 360:
+            await update.message.reply_text(tr(lang, "invalid_number"))
+            return
+        field = "morning_athkar_offset_minutes" if kind == "morning" else "evening_athkar_offset_minutes"
+        await update_user_settings(user_id, prayer_athkar_enabled=True, **{field: minutes})
+        await rebuild_user_schedule(context)
+        prefs = await get_user_prefs(user_id)
+        context.user_data.pop("awaiting_morning_evening_offset", None)
+        context.user_data.pop("morning_evening_offset_kind", None)
+        card_chat_id = context.user_data.pop("morning_evening_card_chat_id", update.effective_chat.id)
+        card_message_id = context.user_data.pop("morning_evening_card_message_id", None)
+        text_result = morning_evening_ready_text(
+            lang, prefs.prayer_city, prefs.timezone,
+            prefs.morning_athkar_offset_minutes or 30,
+            prefs.evening_athkar_offset_minutes or 30,
+        )
+        if card_message_id:
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=card_chat_id,
+                    message_id=card_message_id,
+                    text=text_result,
+                    reply_markup=morning_evening_menu(lang, prefs),
+                )
+                return
+            except BadRequest:
+                logger.debug("Could not update morning/evening settings card", exc_info=True)
+        await update.message.reply_text(text_result, reply_markup=morning_evening_menu(lang, prefs))
         return
 
     if context.user_data.get("awaiting_custom_interval"):
@@ -1350,7 +1558,10 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await rebuild_user_schedule(context)
         if context.user_data.get("setup_flow"):
             prefs = await get_user_prefs(user_id)
-            await update.message.reply_text(setup_delivery_prompt(prefs, lang), reply_markup=delivery_menu(lang, is_daily_goal(prefs)))
+            await update.message.reply_text(
+                setup_delivery_prompt(prefs, lang),
+                reply_markup=delivery_menu(lang, is_daily_goal(prefs), editing=is_editing_setup(context)),
+            )
         else:
             await update.message.reply_text(tr(lang, "saved"))
         return
@@ -1374,7 +1585,10 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await rebuild_user_schedule(context)
         if context.user_data.get("setup_flow"):
             prefs = await get_user_prefs(user_id)
-            await update.message.reply_text(setup_delivery_prompt(prefs, lang), reply_markup=delivery_menu(lang, is_daily_goal(prefs)))
+            await update.message.reply_text(
+                setup_delivery_prompt(prefs, lang),
+                reply_markup=delivery_menu(lang, is_daily_goal(prefs), editing=is_editing_setup(context)),
+            )
         else:
             await update.message.reply_text(tr(lang, "saved"))
         return
@@ -1398,14 +1612,17 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context.user_data.pop(key, None)
             await rebuild_user_schedule(context)
             prefs = await get_user_prefs(user_id)
-            await update.message.reply_text(setup_delivery_prompt(prefs, lang), reply_markup=delivery_menu(lang, is_daily_goal(prefs)))
+            await update.message.reply_text(
+                setup_delivery_prompt(prefs, lang),
+                reply_markup=delivery_menu(lang, is_daily_goal(prefs), editing=is_editing_setup(context)),
+            )
             return
         prefs = await get_user_prefs(user_id)
         athkar = find_athkar(selected[index], prefs)
         name = athkar["ar" if lang == "ar" else "en"] if athkar else selected[index]
         prompt = tr(lang, "advanced_goal_title").replace("{name}", name).replace("{position}", str(index + 1)).replace("{total}", str(len(selected)))
         text_result = setup_schedule_context(prefs, lang, prompt) if context.user_data.get("setup_flow") else prompt
-        await update.message.reply_text(text_result, reply_markup=advanced_goal_menu(lang))
+        await update.message.reply_text(text_result, reply_markup=advanced_goal_menu(lang, editing=is_editing_setup(context)))
         return
 
     if context.user_data.get("awaiting_custom_quiet_hours"):
@@ -1439,6 +1656,9 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await rebuild_user_schedule(context)
         prefs = await get_user_prefs(user_id)
         context.user_data.pop("setup_flow", None)
+        context.user_data.pop("editing_setup", None)
+        context.user_data.pop("draft_selected", None)
+        context.user_data.pop("setup_back_callback", None)
         await update.message.reply_text(setup_summary_text(prefs, lang), reply_markup=setup_complete_menu(lang))
         return
 
@@ -1460,6 +1680,9 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await rebuild_user_schedule(context)
         prefs = await get_user_prefs(user_id)
         context.user_data.pop("setup_flow", None)
+        context.user_data.pop("editing_setup", None)
+        context.user_data.pop("draft_selected", None)
+        context.user_data.pop("setup_back_callback", None)
         await update.message.reply_text(setup_summary_text(prefs, lang), reply_markup=setup_complete_menu(lang))
         return
 
@@ -1769,7 +1992,7 @@ async def build_jobs_for_user(user):
             fajr = parse_prayer_datetime(day, "Fajr", timings, user.timezone or "Africa/Cairo")
             asr = parse_prayer_datetime(day, "Asr", timings, user.timezone or "Africa/Cairo")
             if fajr and not morning_scheduled:
-                run_time = fajr + timedelta(minutes=30)
+                run_time = fajr + timedelta(minutes=user.morning_athkar_offset_minutes or 30)
                 if run_time > now:
                     reminder_scheduler.add_job(
                         send_morning_evening_athkar,
@@ -1782,7 +2005,7 @@ async def build_jobs_for_user(user):
                     )
                     morning_scheduled = True
             if asr and not evening_scheduled:
-                run_time = asr + timedelta(minutes=30)
+                run_time = asr + timedelta(minutes=user.evening_athkar_offset_minutes or 30)
                 if run_time > now:
                     reminder_scheduler.add_job(
                         send_morning_evening_athkar,
