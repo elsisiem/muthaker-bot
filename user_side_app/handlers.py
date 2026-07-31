@@ -65,7 +65,7 @@ from .community_dispatcher import fetch_prayer_times
 from services.timezone_service import detect_timezone_from_location
 
 logger = logging.getLogger(__name__)
-UI_BUILD = "user-side-v202"
+UI_BUILD = "user-side-v203"
 CAIRO_TZ = pytz.timezone("Africa/Cairo")
 QUIET_HOUR_PRESETS = {"normal": (23, 6), "early": (21, 5), "night_owl": (1, 9), "none": (0, 0)}
 

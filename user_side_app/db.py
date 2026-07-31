@@ -309,12 +309,14 @@ async def update_target_settings(owner_telegram_id: str, chat_id: str, **setting
 
 
 async def reset_user_preferences(telegram_id: str):
-    """Clear a user's personal setup while retaining the account record itself."""
+    """Clear all user-owned setup while retaining the account record itself."""
     async with async_session() as session:
         result = await session.execute(select(UserPreferences).where(UserPreferences.telegram_id == telegram_id))
         row = result.scalars().first()
         if not row:
             return None
+        await session.execute(delete(CommunityPost).where(CommunityPost.owner_telegram_id == telegram_id))
+        await session.execute(delete(PostingTarget).where(PostingTarget.owner_telegram_id == telegram_id))
         row.language = "ar"
         row.mode = "personal"
         row.selected_athkar = "[]"
