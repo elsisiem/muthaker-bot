@@ -27,6 +27,10 @@ class UserPreferences(Base):
     daily_goal_per_athkar = Column(Text, nullable=True)
     delivery_mode = Column(String, default="rotating")
     prayer_athkar_enabled = Column(Boolean, default=False)
+    # Keep the two offsets independent: morning and evening may be scheduled
+    # at different intervals after Fajr and Asr.
+    morning_athkar_offset_minutes = Column(Integer, default=30)
+    evening_athkar_offset_minutes = Column(Integer, default=30)
     prayer_city = Column(String, nullable=True)
     timezone = Column(String, default="Africa/Cairo")
     quiet_hours_preset = Column(String, default="normal")
@@ -102,6 +106,8 @@ async def init_db():
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS custom_athkar TEXT"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS delivery_mode VARCHAR DEFAULT 'rotating'"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS prayer_athkar_enabled BOOLEAN DEFAULT FALSE"))
+        await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS morning_athkar_offset_minutes INTEGER DEFAULT 30"))
+        await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS evening_athkar_offset_minutes INTEGER DEFAULT 30"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS prayer_city VARCHAR"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS timezone VARCHAR DEFAULT 'Africa/Cairo'"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS quiet_hours_preset VARCHAR DEFAULT 'normal'"))
@@ -166,6 +172,8 @@ async def update_user_settings(
     daily_goal_per_athkar: str | None = None,
     delivery_mode: str | None = None,
     prayer_athkar_enabled: bool | None = None,
+    morning_athkar_offset_minutes: int | None = None,
+    evening_athkar_offset_minutes: int | None = None,
     prayer_city: str | None = None,
     timezone: str | None = None,
     quiet_hours_preset: str | None = None,
@@ -199,6 +207,10 @@ async def update_user_settings(
             row.delivery_mode = delivery_mode
         if prayer_athkar_enabled is not None:
             row.prayer_athkar_enabled = prayer_athkar_enabled
+        if morning_athkar_offset_minutes is not None:
+            row.morning_athkar_offset_minutes = morning_athkar_offset_minutes
+        if evening_athkar_offset_minutes is not None:
+            row.evening_athkar_offset_minutes = evening_athkar_offset_minutes
         if prayer_city is not None:
             row.prayer_city = prayer_city
         if timezone is not None:
@@ -327,6 +339,8 @@ async def reset_user_preferences(telegram_id: str):
         row.daily_goal_per_athkar = None
         row.delivery_mode = "sequential"
         row.prayer_athkar_enabled = False
+        row.morning_athkar_offset_minutes = 30
+        row.evening_athkar_offset_minutes = 30
         row.prayer_city = None
         row.timezone = "Africa/Cairo"
         row.quiet_hours_preset = "normal"
