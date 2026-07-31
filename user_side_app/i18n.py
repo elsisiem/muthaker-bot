@@ -663,7 +663,7 @@ _COMMUNITY_TEXTS: dict[str, dict[str, str]] = {
         "community_prayer_title": "مواقيت الصلاة في {city} — {date}",
         "community_prayer_missing_city": "اضبط مدينة الجهة أولاً حتى نحسب المواقيت بدقة.",
         "community_prayer_failed": "تعذّر جلب مواقيت الصلاة الآن. حاول مرة أخرى بعد قليل.",
-        "community_saved": "تم الحفظ. سيعمل النشر وفق الاختيارات الظاهرة بعلامة ✅.",
+        "community_saved": "تم الحفظ. سيعمل النشر وفق الاختيارات الظاهرة بعلامة ☑️.",
         "community_test_text": "📬 هذه رسالة تجريبية من مُذكِّر الأذكار. إعدادات النشر لهذه الجهة تعمل.",
         "target_setup_community": "أضف البوت مشرفاً في مجموعتك أو قناتك، ثم اخترها من الزر أدناه. لا نصل إلى أي جهة إلا التي تختارها بنفسك.",
     },
@@ -675,7 +675,7 @@ _COMMUNITY_TEXTS: dict[str, dict[str, str]] = {
         "community_city_prompt": "Type the city where this group or channel is based. We use it only for prayer times.",
         "community_city_saved": "{target} is set to: {city}\nTime zone: {timezone}", "community_city_failed": "We could not recognise that city. Try a clearer name, such as Riyadh or Cairo.",
         "community_prayer_title": "Prayer times in {city} — {date}", "community_prayer_missing_city": "Set this community's city first so prayer times are accurate.",
-        "community_prayer_failed": "Prayer times could not be fetched right now. Please try again shortly.", "community_saved": "Saved. Items marked ✅ will be posted.",
+        "community_prayer_failed": "Prayer times could not be fetched right now. Please try again shortly.", "community_saved": "Saved. Items marked ☑️ will be posted.",
         "community_test_text": "📬 This is a test message from Muthaker. Posting is working for this community.",
         "target_setup_community": "Make the bot an admin in your group or channel, then choose it below. We only access the community you choose.",
     },
@@ -687,7 +687,7 @@ _COMMUNITY_TEXTS: dict[str, dict[str, str]] = {
         "community_city_prompt": "Escribe la ciudad de este grupo o canal. Solo la usamos para los horarios de oración.",
         "community_city_saved": "{target} se configuró en: {city}\nZona horaria: {timezone}", "community_city_failed": "No pudimos reconocer la ciudad. Prueba con un nombre más claro.",
         "community_prayer_title": "Horarios de oración en {city} — {date}", "community_prayer_missing_city": "Configura primero la ciudad de la comunidad.",
-        "community_prayer_failed": "No se pudieron obtener los horarios ahora. Inténtalo de nuevo pronto.", "community_saved": "Guardado. Se publicarán los elementos con ✅.",
+        "community_prayer_failed": "No se pudieron obtener los horarios ahora. Inténtalo de nuevo pronto.", "community_saved": "Guardado. Se publicarán los elementos con ☑️.",
         "community_test_text": "📬 Mensaje de prueba de Muthaker. La publicación funciona para esta comunidad.",
         "target_setup_community": "Haz al bot administrador del grupo o canal y selecciónalo abajo.",
     },
@@ -699,7 +699,7 @@ _COMMUNITY_TEXTS: dict[str, dict[str, str]] = {
         "community_city_prompt": "Saisissez la ville de ce groupe ou canal. Elle sert uniquement aux horaires de prière.",
         "community_city_saved": "{target} est réglé sur : {city}\nFuseau horaire : {timezone}", "community_city_failed": "Ville introuvable. Essayez un nom plus précis.",
         "community_prayer_title": "Horaires de prière à {city} — {date}", "community_prayer_missing_city": "Définissez d'abord la ville de cette communauté.",
-        "community_prayer_failed": "Impossible de récupérer les horaires maintenant. Réessayez bientôt.", "community_saved": "Enregistré. Les éléments marqués ✅ seront publiés.",
+        "community_prayer_failed": "Impossible de récupérer les horaires maintenant. Réessayez bientôt.", "community_saved": "Enregistré. Les éléments marqués ☑️ seront publiés.",
         "community_test_text": "📬 Message de test de Muthaker. La publication fonctionne pour cette communauté.",
         "target_setup_community": "Ajoutez le bot comme administrateur du groupe ou canal, puis choisissez-le ci-dessous.",
     },
@@ -711,7 +711,7 @@ _COMMUNITY_TEXTS: dict[str, dict[str, str]] = {
         "community_city_prompt": "Bu grubun veya kanalın şehrini yazın. Bunu yalnızca namaz vakitleri için kullanırız.",
         "community_city_saved": "{target} şuna ayarlandı: {city}\nSaat dilimi: {timezone}", "community_city_failed": "Şehir tanınamadı. Daha açık bir ad deneyin.",
         "community_prayer_title": "{city} namaz vakitleri — {date}", "community_prayer_missing_city": "Önce bu topluluğun şehrini ayarlayın.",
-        "community_prayer_failed": "Namaz vakitleri şu anda alınamadı. Lütfen biraz sonra tekrar deneyin.", "community_saved": "Kaydedildi. ✅ işaretli öğeler yayınlanacak.",
+        "community_prayer_failed": "Namaz vakitleri şu anda alınamadı. Lütfen biraz sonra tekrar deneyin.", "community_saved": "Kaydedildi. ☑️ işaretli öğeler yayınlanacak.",
         "community_test_text": "📬 Muthaker deneme mesajı. Bu topluluk için paylaşım çalışıyor.",
         "target_setup_community": "Botu grubunuzda veya kanalınızda yönetici yapın, sonra aşağıdan seçin.",
     },
@@ -867,6 +867,103 @@ TEXTS["ar"]["choose_mode"] = (
     "التوقيت المحلي. ويُحفظ اسم المدينة فقط عند اختيار إعداد يعتمد على أوقات اليوم، "
     "فاطمئنوا بارك الله فيكم."
 )
+
+# Final Arabic product copy. This block is intentionally last: it is the
+# authoritative wording for the Arabic-first experience after the earlier
+# compatibility dictionaries have been merged.
+TEXTS["ar"].update({
+    "welcome": (
+        "الحمد لله رب العالمين، والصلاة والسلام على نبينا محمد الصادق الأمين وعلى آله وصحبه أجمعين، أما بعد:\n\n"
+        "قال الله -عز وجل- آمرًا: ﴿يَا أَيُّهَا الَّذِينَ آمَنُوا اذْكُرُوا اللَّهَ ذِكْرًا كَثِيرًا﴾\n"
+        "وقال -تبارك وتعالى- منذرًا: ﴿وَمَنْ يَعْشُ عَنْ ذِكْرِ الرَّحْمَنِ نُقَيِّضْ لَهُ شَيْطَاناً﴾\n"
+        "وقال -سبحانه- واعدًا: ﴿فَاذْكُرُونِي أَذْكُرْكُمْ﴾\n"
+        "وقال -جل جلاله- متوعدًا: ﴿فَوَيْلٌ لِلْقَاسِيَةِ قُلُوبُهُمْ مِنْ ذِكْرِ اللَّهِ﴾\n"
+        "وقال -تعالى ذكره- محذرًا: ﴿وَمَنْ أَعْرَضَ عَنْ ذِكْرِي فَإِنَّ لَهُ مَعِيشَةً ضَنكاً﴾\n"
+        "وقال -تقدست أسماؤه- مبشرًا: ﴿وَالذَّاكِرِينَ اللَّهَ كَثِيرًا وَالذَّاكِرَاتِ أَعَدَّ اللَّهُ لَهُمْ مَغْفِرَةً وَأَجْرًا عَظِيمًا﴾\n\n"
+        "نضع بين أيديكم هذا البوت، ليعمل بمقتضى اسمه فيكون لكم عونًا إذا فترت الأركان، ومذكِّرًا إذا جف اللسان.\n"
+        "والله المستعان وعليه التكلان ولا حول ولا قوة إلا بالله.\n\n"
+        "*تنبيه: بعض الإعدادات تتطلب معرفة مواقيتكم المحلية لتعمل على الوجه المبتغى، ولذلك ستجدون البوت يطلب منكم مشاركة موقعكم أو اسم مدينتكم.*\n"
+        "*نشهد الله أننا لا نحتفظ بشيء من ذلك، ويقوم البوت بحذفه فور تحديد خط الطول، فاطمئنوا بارك الله فيكم.*"
+    ),
+    "mode_personal": "👤 أورادي الشخصية",
+    "personal_menu": "أورادي الشخصية\n\nتجد هنا ما تحتاجه لجدولة أورادك اليومية.",
+    "athkar_menu_title": "أوراد الذكر العامة\n\nالخطوة الأولى من أصل أربعة: اختر أوراد الذكر التي ترغب في تفعيلها.",
+    "save_continue": "☑️ حفظ",
+    "save": "☑️ حفظ",
+    "done": "☑️ تم",
+    "strategy_interval": "معدل زمني (كل X دقائق أو ساعات)",
+    "interval_custom": "غير ذلك",
+    "delivery_batch": "أرسلها معًا",
+    "quiet_none": "بدون ساعات نوم — لا أنام :)",
+    "quiet_custom": "تحديد وقت مخصص — دعني أحدد وحدي",
+    "quiet_custom_prompt": "اكتب فترة نوم واحدة أو أكثر بصيغة HH:MM-HH:MM، وافصل بينها بفاصلة. مثال: 22:00-05:00،13:00-14:00.",
+    "quiet_custom_invalid": "أدخل فترة صحيحة مثل 22:00-05:00، أو عدة فترات مفصولة بفاصلة.",
+    "quiet_hours_title": (
+        "الخطوة الرابعة من أصل أربعة: متى تتوقف الأوراد أثناء النوم؟\n\n"
+        "يمكنك تحديد أكثر من فترة توقف من خلال خيار «تحديد وقت مخصص»."
+    ),
+    "setup_step_schedule": "الخطوة الثانية من أصل أربعة: اختر الوتيرة المناسبة لأورادك.",
+    "setup_step_delivery": "الخطوة الثالثة من أصل أربعة: اختر طريقة الإرسال.",
+    "setup_step_quiet": "الخطوة الرابعة من أصل أربعة: اختر ساعات النوم التي يتوقف فيها الإرسال.",
+    "setup_progress_1": "الخطوة الأولى من أصل أربعة مكتملة",
+    "setup_progress_2": "الخطوة الثانية من أصل أربعة مكتملة",
+    "setup_progress_3": "الخطوة الثالثة من أصل أربعة مكتملة",
+    "help_text": (
+        "المساعدة\n\n"
+        "• رتّب أورادك من «أورادي الشخصية».\n"
+        "• فعّل أذكار الصباح والمساء بحسب وقت مدينتك.\n"
+        "• أضف مجموعاتك وقنواتك من «مجموعاتي وقنواتي».\n\n"
+        "يمكنك دائمًا استخدام /view_settings لعرض إعداداتك أو /edit_setting لتعديلها."
+    ),
+})
+
+TEXTS["en"].update({
+    "save_continue": "☑️ Save",
+    "save": "☑️ Save",
+    "done": "☑️ Done",
+    "help_text": (
+        "Help\n\n"
+        "• Schedule daily Athkar in My personal Athkar.\n"
+        "• Enable morning and evening Athkar using your local time.\n"
+        "• Manage posting in My groups & channels.\n\n"
+        "Use /view_settings to review settings or /edit_setting to change them."
+    ),
+})
+
+TEXTS["es"].update({
+    "save_continue": "☑️ Guardar", "save": "☑️ Guardar", "done": "☑️ Listo",
+    "help_text": (
+        "Ayuda\n\n• Programa adhkar diarios en Mis adhkar personales.\n"
+        "• Activa los adhkar de la mañana y de la tarde según tu hora local.\n"
+        "• Gestiona publicaciones en Mis grupos y canales.\n\n"
+        "Usa /view_settings para ver tus ajustes o /edit_setting para modificarlos."
+    ),
+})
+TEXTS["fr"].update({
+    "save_continue": "☑️ Enregistrer", "save": "☑️ Enregistrer", "done": "☑️ Terminé",
+    "help_text": (
+        "Aide\n\n• Programmez les adhkâr quotidiens dans Mes adhkâr personnels.\n"
+        "• Activez les adhkâr du matin et du soir selon votre heure locale.\n"
+        "• Gérez les publications dans Mes groupes et canaux.\n\n"
+        "Utilisez /view_settings pour consulter vos réglages ou /edit_setting pour les modifier."
+    ),
+})
+TEXTS["tr"].update({
+    "save_continue": "☑️ Kaydet", "save": "☑️ Kaydet", "done": "☑️ Tamam",
+    "help_text": (
+        "Yardım\n\n• Günlük zikirlerinizi Kişisel zikirlerim bölümünde planlayın.\n"
+        "• Sabah ve akşam zikirlerini yerel saatinize göre etkinleştirin.\n"
+        "• Gruplarım ve kanallarım bölümündeki yayınları yönetin.\n\n"
+        "Ayarları görmek için /view_settings, değiştirmek için /edit_setting kullanın."
+    ),
+})
+
+# A selected item is always shown with the requested black checkbox, including
+# older compatibility strings retained above for users with an existing flow.
+for _translations in TEXTS.values():
+    for _key, _value in _translations.items():
+        if isinstance(_value, str) and "✅" in _value:
+            _translations[_key] = _value.replace("✅", "☑️")
 
 
 def normalize_lang(lang: str | None, fallback: str = DEFAULT_LANG) -> str:

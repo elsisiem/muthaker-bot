@@ -33,6 +33,10 @@ class UserPreferences(Base):
     quiet_end_hour = Column(Integer, default=6)
     quiet_start_minute = Column(Integer, default=0)
     quiet_end_minute = Column(Integer, default=0)
+    # JSON list of custom quiet periods, for example [[1320, 300], [780, 840]].
+    # The original single-period columns remain as a backwards-compatible
+    # first period for older installs and goal-spacing calculations.
+    quiet_periods = Column(Text, nullable=True)
     onboarding_complete = Column(Boolean, default=False)
     timezone_confirmed = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
@@ -103,6 +107,7 @@ async def init_db():
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS quiet_end_hour INTEGER DEFAULT 6"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS quiet_start_minute INTEGER DEFAULT 0"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS quiet_end_minute INTEGER DEFAULT 0"))
+        await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS quiet_periods TEXT"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS onboarding_complete BOOLEAN DEFAULT FALSE"))
         await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS timezone_confirmed BOOLEAN DEFAULT FALSE"))
         await conn.execute(text("ALTER TABLE posting_targets ADD COLUMN IF NOT EXISTS city VARCHAR"))
@@ -165,6 +170,7 @@ async def update_user_settings(
     quiet_end_hour: int | None = None,
     quiet_start_minute: int | None = None,
     quiet_end_minute: int | None = None,
+    quiet_periods: str | None = None,
     onboarding_complete: bool | None = None,
     timezone_confirmed: bool | None = None,
 ):
@@ -202,6 +208,8 @@ async def update_user_settings(
             row.quiet_start_minute = quiet_start_minute
         if quiet_end_minute is not None:
             row.quiet_end_minute = quiet_end_minute
+        if quiet_periods is not None:
+            row.quiet_periods = quiet_periods
         if onboarding_complete is not None:
             row.onboarding_complete = onboarding_complete
         if timezone_confirmed is not None:

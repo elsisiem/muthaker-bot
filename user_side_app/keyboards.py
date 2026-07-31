@@ -25,8 +25,8 @@ def persistent_language_row(lang: str) -> list[InlineKeyboardButton]:
 
 def settings_footer(lang: str, back_callback: str) -> list[list[InlineKeyboardButton]]:
     return [[
-        InlineKeyboardButton(tr(lang, "cfg_timezone"), callback_data="cfg_personal_timezone"),
         InlineKeyboardButton(tr(lang, "lang_button"), callback_data="open_lang_menu"),
+        InlineKeyboardButton(tr(lang, "cfg_timezone"), callback_data="cfg_personal_timezone"),
     ], *navigation_footer(lang, back_callback)]
 
 
@@ -71,8 +71,12 @@ def personal_menu(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(tr(lang, "setup_reminders"), callback_data="cfg_personal_setup")],
         [InlineKeyboardButton(tr(lang, "cfg_prayer"), callback_data="cfg_personal_prayer")],
-        [InlineKeyboardButton(tr(lang, "show_settings"), callback_data="cfg_personal_show")],
-        *settings_footer(lang, "home"),
+        [
+            InlineKeyboardButton(tr(lang, "lang_button"), callback_data="open_lang_menu"),
+            InlineKeyboardButton(tr(lang, "show_settings"), callback_data="cfg_personal_show"),
+            InlineKeyboardButton(tr(lang, "cfg_timezone"), callback_data="cfg_personal_timezone"),
+        ],
+        *navigation_footer(lang, "home"),
     ])
 
 
@@ -91,7 +95,7 @@ def community_connect_menu(lang: str) -> InlineKeyboardMarkup:
 
 def community_menu(lang: str, target) -> InlineKeyboardMarkup:
     def state(enabled: bool) -> str:
-        return "✅" if enabled else "⚪"
+        return "☑️" if enabled else "⚪"
 
     rows = [
         [
@@ -136,16 +140,33 @@ def remove_target_menu(lang: str, targets: list[tuple[str, str]]) -> InlineKeybo
 
 def athkar_select_menu(lang: str, items: list[tuple[str, str, bool]]) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
-    for athkar_id, label, selected in items:
+    # Put Al-Hirz first on its own line; the remaining eight options form a
+    # compact, balanced two-column grid that is easy to scan in Arabic.
+    for index, (athkar_id, label, selected) in enumerate(items):
         # Keep the selected mark compact; all other actions use normal emoji.
         prefix = "✓ " if selected else "✖️ "
-        rows.append([InlineKeyboardButton(f"{prefix}{label}", callback_data=f"athkar_toggle_{athkar_id}")])
+        button = InlineKeyboardButton(f"{prefix}{label}", callback_data=f"athkar_toggle_{athkar_id}")
+        if index == 0:
+            rows.append([button])
+        elif (index - 1) % 2 == 0:
+            rows.append([button])
+        else:
+            rows[-1].append(button)
     rows.append([
         InlineKeyboardButton(tr(lang, "clear_all"), callback_data="athkar_clear_all"),
         InlineKeyboardButton(tr(lang, "choose_all"), callback_data="athkar_select_all"),
     ])
-    rows.append([InlineKeyboardButton(tr(lang, "save_continue"), callback_data="athkar_save")])
-    rows.extend(settings_footer(lang, "mode_personal"))
+    rows.append([
+        InlineKeyboardButton(tr(lang, "lang_button"), callback_data="open_lang_menu"),
+        InlineKeyboardButton(tr(lang, "cfg_timezone"), callback_data="cfg_personal_timezone"),
+    ])
+    # Saving is an action within this step, so it belongs between back and
+    # close rather than in a detached row above the navigation.
+    rows.append([
+        InlineKeyboardButton(tr(lang, "back"), callback_data="mode_personal"),
+        InlineKeyboardButton(tr(lang, "save_continue"), callback_data="athkar_save"),
+        InlineKeyboardButton(tr(lang, "close"), callback_data="close_home"),
+    ])
     return InlineKeyboardMarkup(rows)
 
 
@@ -224,9 +245,16 @@ def quiet_hours_menu(lang: str) -> InlineKeyboardMarkup:
 
 def setup_complete_menu(lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(tr(lang, "edit_setup"), callback_data="cfg_personal_setup")],
-        [InlineKeyboardButton(tr(lang, "start_over"), callback_data="cfg_personal_setup")],
-        *settings_footer(lang, "mode_personal"),
+        [InlineKeyboardButton(tr(lang, "done"), callback_data="close_home")],
+        [
+            InlineKeyboardButton(tr(lang, "edit_setup"), callback_data="cfg_personal_setup"),
+            InlineKeyboardButton(tr(lang, "start_over"), callback_data="cfg_personal_setup"),
+        ],
+        [
+            InlineKeyboardButton(tr(lang, "lang_button"), callback_data="open_lang_menu"),
+            InlineKeyboardButton(tr(lang, "show_settings"), callback_data="cfg_personal_show"),
+            InlineKeyboardButton(tr(lang, "cfg_timezone"), callback_data="cfg_personal_timezone"),
+        ],
     ])
 
 
