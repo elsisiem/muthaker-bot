@@ -15,7 +15,10 @@ from .handlers import (
     choose_group_mode,
     choose_personal_mode,
     close_to_home,
+    confirm_reset,
     begin_personal_setup,
+    begin_custom_athkar,
+    execute_reset,
     clear_all_athkar,
     handle_location_input,
     handle_text_input,
@@ -86,6 +89,8 @@ application.add_handler(CallbackQueryHandler(set_language, pattern="^lang_[a-z]{
 application.add_handler(CallbackQueryHandler(open_language_menu, pattern="^open_lang_menu$"))
 application.add_handler(CallbackQueryHandler(go_home, pattern="^home$"))
 application.add_handler(CallbackQueryHandler(close_to_home, pattern="^close_home$"))
+application.add_handler(CallbackQueryHandler(confirm_reset, pattern="^reset_confirm$"))
+application.add_handler(CallbackQueryHandler(execute_reset, pattern="^reset_execute$"))
 application.add_handler(CallbackQueryHandler(choose_personal_mode, pattern="^mode_personal$"))
 application.add_handler(CallbackQueryHandler(begin_personal_setup, pattern="^cfg_personal_setup$"))
 application.add_handler(CallbackQueryHandler(choose_group_mode, pattern="^mode_group$"))
@@ -98,6 +103,7 @@ application.add_handler(CallbackQueryHandler(open_personal_athkar, pattern="^cfg
 application.add_handler(CallbackQueryHandler(toggle_athkar, pattern="^athkar_toggle_"))
 application.add_handler(CallbackQueryHandler(select_all_athkar, pattern="^athkar_select_all$"))
 application.add_handler(CallbackQueryHandler(clear_all_athkar, pattern="^athkar_clear_all$"))
+application.add_handler(CallbackQueryHandler(begin_custom_athkar, pattern="^athkar_custom_add$"))
 application.add_handler(CallbackQueryHandler(save_athkar, pattern="^athkar_save$"))
 application.add_handler(CallbackQueryHandler(open_schedule_menu, pattern="^cfg_personal_schedule$"))
 application.add_handler(CallbackQueryHandler(set_schedule, pattern="^schedule_"))
@@ -105,13 +111,13 @@ application.add_handler(CallbackQueryHandler(choose_goal_scope, pattern="^goal_s
 application.add_handler(CallbackQueryHandler(set_goal_value, pattern="^goal_(total|each)_"))
 application.add_handler(CallbackQueryHandler(set_advanced_goal, pattern="^goal_adv_"))
 application.add_handler(CallbackQueryHandler(open_delivery_menu, pattern="^cfg_personal_delivery$"))
-application.add_handler(CallbackQueryHandler(set_delivery, pattern="^delivery_(rotating|batch)$"))
+application.add_handler(CallbackQueryHandler(set_delivery, pattern="^delivery_(rotating|batch|random|complete|sequential)$"))
 application.add_handler(CallbackQueryHandler(toggle_prayer, pattern="^cfg_personal_prayer$"))
 application.add_handler(CallbackQueryHandler(open_quiet_hours_menu, pattern="^cfg_personal_quiet$"))
 application.add_handler(CallbackQueryHandler(begin_timezone_setup, pattern="^cfg_personal_timezone$"))
 application.add_handler(CallbackQueryHandler(
     set_quiet_hours,
-    pattern="^quiet_(normal|early|night_owl|none|fajr_isha|sleep_10_fajr|sleep_11_fajr|sleep_12_fajr|custom)$",
+    pattern="^quiet_(normal|early|night_owl|none|fajr_isha|sleep_10_fajr|sleep_11_fajr|sleep_12_fajr|sleep_1_fajr|custom)$",
 ))
 application.add_handler(CallbackQueryHandler(show_personal_settings, pattern="^cfg_personal_show$"))
 application.add_handler(CallbackQueryHandler(manage_targets, pattern="^targets_manage_group$|^targets_manage_channel$|^targets_manage$"))
