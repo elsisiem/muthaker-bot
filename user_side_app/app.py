@@ -40,6 +40,8 @@ from .handlers import (
     set_schedule,
     set_goal_value,
     set_advanced_goal,
+    edit_settings_command,
+    help_command,
     settings_command,
     start,
     show_personal_settings,
@@ -72,7 +74,10 @@ async def log_error(update, context):
     logger.error("Unhandled bot update error", exc_info=context.error)
 
 application.add_handler(CommandHandler("start", start))
+application.add_handler(CommandHandler("help", help_command))
 application.add_handler(CommandHandler("settings", settings_command))
+application.add_handler(CommandHandler("view_settings", settings_command))
+application.add_handler(CommandHandler("edit_setting", edit_settings_command))
 application.add_handler(CommandHandler("link", link_target))
 application.add_handler(CommandHandler("version", version))
 application.add_handler(ChatMemberHandler(auto_register_target, ChatMemberHandler.MY_CHAT_MEMBER))
@@ -131,10 +136,13 @@ application.add_error_handler(log_error)
 
 
 async def configure_command_menu():
-    """Keep Start and Settings visible in Telegram's native command menu."""
+    """Keep the everyday routes visible in Telegram's native command menu."""
     await application.bot.set_my_commands([
         BotCommand("start", "البدء"),
+        BotCommand("help", "المساعدة"),
         BotCommand("settings", "عرض الإعدادات"),
+        BotCommand("view_settings", "عرض الإعدادات"),
+        BotCommand("edit_setting", "تعديل الإعدادات"),
     ])
 
 
