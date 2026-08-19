@@ -88,8 +88,10 @@ application.add_handler(CommandHandler("start", start))
 application.add_handler(CommandHandler("help", help_command))
 application.add_handler(CommandHandler("settings", settings_command))
 application.add_handler(CommandHandler("view_settings", settings_command))
+application.add_handler(CommandHandler("view", settings_command))
 application.add_handler(CommandHandler("edit_setting", edit_settings_command))
 application.add_handler(CommandHandler("edit_settings", edit_settings_command))
+application.add_handler(CommandHandler("edit", edit_settings_command))
 application.add_handler(CommandHandler("morning_evening", morning_evening_command))
 application.add_handler(CommandHandler("groups", communities_command))
 application.add_handler(CommandHandler("reset", reset_command))
@@ -162,10 +164,8 @@ async def configure_command_menu():
     """Publish a compact Arabic command menu through Telegram's Bot API."""
     await application.bot.set_my_commands([
         BotCommand("start", "البدء"),
-        BotCommand("view_settings", "عرض الإعدادات"),
-        BotCommand("edit_settings", "تعديل الإعدادات"),
-        BotCommand("morning_evening", "أذكار الصباح والمساء"),
-        BotCommand("groups", "المجموعات والقنوات"),
+        BotCommand("edit", "تعديل"),
+        BotCommand("view", "عرض"),
         BotCommand("reset", "البدء من جديد"),
         BotCommand("help", "المساعدة"),
     ])
