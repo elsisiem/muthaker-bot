@@ -48,6 +48,9 @@ from .handlers import (
     set_advanced_goal,
     edit_settings_command,
     help_command,
+    reset_command,
+    communities_command,
+    morning_evening_command,
     settings_command,
     start,
     show_personal_settings,
@@ -86,6 +89,10 @@ application.add_handler(CommandHandler("help", help_command))
 application.add_handler(CommandHandler("settings", settings_command))
 application.add_handler(CommandHandler("view_settings", settings_command))
 application.add_handler(CommandHandler("edit_setting", edit_settings_command))
+application.add_handler(CommandHandler("edit_settings", edit_settings_command))
+application.add_handler(CommandHandler("morning_evening", morning_evening_command))
+application.add_handler(CommandHandler("groups", communities_command))
+application.add_handler(CommandHandler("reset", reset_command))
 application.add_handler(CommandHandler("link", link_target))
 application.add_handler(CommandHandler("version", version))
 application.add_handler(ChatMemberHandler(auto_register_target, ChatMemberHandler.MY_CHAT_MEMBER))
@@ -152,13 +159,15 @@ application.add_error_handler(log_error)
 
 
 async def configure_command_menu():
-    """Keep the everyday routes visible in Telegram's native command menu."""
+    """Publish a compact Arabic command menu through Telegram's Bot API."""
     await application.bot.set_my_commands([
         BotCommand("start", "البدء"),
-        BotCommand("help", "المساعدة"),
-        BotCommand("settings", "عرض الإعدادات"),
         BotCommand("view_settings", "عرض الإعدادات"),
-        BotCommand("edit_setting", "تعديل الإعدادات"),
+        BotCommand("edit_settings", "تعديل الإعدادات"),
+        BotCommand("morning_evening", "أذكار الصباح والمساء"),
+        BotCommand("groups", "المجموعات والقنوات"),
+        BotCommand("reset", "البدء من جديد"),
+        BotCommand("help", "المساعدة"),
     ])
 
 

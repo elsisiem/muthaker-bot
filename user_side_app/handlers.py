@@ -1070,6 +1070,85 @@ async def edit_settings_command(update: Update, context: ContextTypes.DEFAULT_TY
     await update.message.reply_text(tr(lang, "personal_menu"), reply_markup=personal_menu(lang))
 
 
+async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Offer the same deliberate reset confirmation from Telegram's command menu."""
+    if not update.effective_user or not update.message:
+        return
+    prefs = await get_user_prefs(str(update.effective_user.id))
+    lang = normalize_lang(prefs.language if prefs else None, "ar")
+    context.user_data["lang"] = lang
+    await update.message.reply_text(
+        tr(lang, "reset_confirmation"),
+        reply_markup=reset_confirmation_menu(lang),
+    )
+
+
+async def communities_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Open the group/channel picker without making the command menu crowded."""
+    if not update.effective_user or not update.message:
+        return
+    user_id = str(update.effective_user.id)
+    prefs = await get_user_prefs(user_id)
+    lang = normalize_lang(prefs.language if prefs else None, "ar")
+    context.user_data["lang"] = lang
+    context.user_data["active_mode"] = "community"
+    await upsert_user_prefs(user_id, update.effective_user.first_name, mode="community")
+    targets = await list_targets(user_id)
+    if targets:
+        await update.message.reply_text(
+            tr(lang, "target_picker_title"),
+            reply_markup=target_picker_menu(lang, targets),
+        )
+        return
+    await update.message.reply_text(
+        f"{tr(lang, 'target_setup_community')}\n\n{tr(lang, 'target_none')}",
+        reply_markup=community_connect_menu(lang),
+    )
+
+
+async def morning_evening_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Provide the morning/evening setup directly from Telegram's command list."""
+    if not update.effective_user or not update.message:
+        return
+    user_id = str(update.effective_user.id)
+    prefs = await get_user_prefs(user_id)
+    lang = normalize_lang(prefs.language if prefs else None, "ar")
+    context.user_data["lang"] = lang
+    if not prefs:
+        prefs = await upsert_user_prefs(user_id, update.effective_user.first_name, language=lang)
+
+    if prefs and prefs.timezone and prefs.prayer_city:
+        await update_user_settings(user_id, prayer_athkar_enabled=True, timezone_confirmed=True)
+        await rebuild_user_schedule(context)
+        prefs = await get_user_prefs(user_id)
+        await update.message.reply_text(
+            morning_evening_ready_text(
+                lang, prefs.prayer_city, prefs.timezone,
+                prefs.morning_athkar_offset_minutes or 30,
+                prefs.evening_athkar_offset_minutes or 30,
+            ),
+            reply_markup=morning_evening_menu(lang, prefs),
+        )
+        return
+
+    # A first-time user gets the same private, location-first route as the
+    # in-menu button. The visible setup card is kept so location completion
+    # can replace it and remove the temporary helper message.
+    context.user_data["awaiting_prayer_setup"] = True
+    card = await update.message.reply_text(
+        f"{tr(lang, 'cfg_prayer')}\n\n{tr(lang, 'prayer_prompt_help')}\n\n"
+        f"{tr(lang, 'prayer_prompt_privacy')}\n\n{tr(lang, 'prayer_prompt_city')}",
+        reply_markup=locality_setup_menu(lang, "mode_personal"),
+    )
+    context.user_data["timezone_main_message_id"] = card.message_id
+    location_prompt = await context.bot.send_message(
+        chat_id=update.effective_user.id,
+        text=f"{tr(lang, 'cfg_prayer')}\n\n{tr(lang, 'prayer_prompt_help')}",
+        reply_markup=location_request_keyboard(lang),
+    )
+    context.user_data["timezone_location_prompt_id"] = location_prompt.message_id
+
+
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Give users a concise, practical route back into the bot."""
     if not update.effective_user or not update.message:
@@ -1077,7 +1156,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prefs = await get_user_prefs(str(update.effective_user.id))
     lang = normalize_lang(prefs.language if prefs else None, "ar")
     context.user_data["lang"] = lang
-    await update.message.reply_text(tr(lang, "help_text"), reply_markup=home_menu(lang))
+    await update.message.reply_text(
+        f"{tr(lang, 'help_text')}\n\n"
+        "/view_settings · /edit_settings · /morning_evening · /groups · /reset",
+        reply_markup=home_menu(lang),
+    )
 
 
 async def toggle_prayer(update: Update, context: ContextTypes.DEFAULT_TYPE):
