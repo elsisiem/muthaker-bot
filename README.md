@@ -1,6 +1,14 @@
-# Muthaker Bot
-
-Telegram athkar reminders for individuals, groups, and channels.
+<h1 align="center">Muthaker (مُذكّر)</h1>
+<p align="center">Telegram athkar reminders for individuals, groups, and channels.</p>
+<p align="center">
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#run-locally">Run locally</a> ·
+  <a href="#deploy">Deploy</a>
+</p>
+<p align="center">
+  <img src="https://img.shields.io/badge/license-MIT-111318?style=flat-square" alt="MIT license">
+  <img src="https://img.shields.io/badge/Python-3.11-111318?style=flat-square&logo=python&logoColor=white" alt="Python 3.11">
+</p>
 
 ## Personal reminders
 
@@ -10,189 +18,91 @@ Telegram athkar reminders for individuals, groups, and channels.
 - Enable morning and evening athkar images, scheduled from Fajr and Asr. The city is requested separately for prayer-time calculation; the default is 30 minutes after each prayer and can be edited later.
 - Arabic, English, Spanish, French, and Turkish interface selection is available from every main menu.
 
+Commands: `/start`, `/view`, `/edit`, `/reset`, `/help`, `/groups`, `/link`.
+
 ## Groups and channels
 
-The existing channel publisher remains active. Add the bot as an administrator, then use `/link` inside the target group/channel to connect it to the owner’s setup. Its existing prayer-based athkar, Quran, and fasting content continues to use the channel service unchanged.
+- Add the bot as an administrator, then send `/link` inside the group or channel to connect it to your setup in the personal bot.
+- A linked group or channel gets morning athkar 30 minutes after Fajr, evening athkar 30 minutes after Asr, and Monday and Thursday fasting reminders 30 minutes after Isha the evening before. Times use the target's own city and timezone.
+- A separate channel publisher posts to the chat set in `TELEGRAM_CHAT_ID`: the morning and evening athkar images and the fasting reminders, on a Cairo prayer-time schedule. Quran page posting is paused.
 
-## Deployment
+## Languages
 
-Set `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, and `DATABASE_URL` in Heroku, then deploy the `master` branch. The `Procfile` launches `main.py`, which runs both the existing channel service and the modular personal-reminder application.
+Arabic, English, Spanish, French, and Turkish. The interface language is chosen per user and can be changed from any main menu. Channel images are in Arabic.
 
----
-**Personalized Islamic Reminders - Quran & Athkar**
+## How it works
 
-A two-sided Telegram bot system running on Heroku that combines:
-1. **Channel Bot** - Posts daily Quran pages + Athkar to a channel on schedule
-2. **User Bot** - Interactive interface for users to configure their personal Athkar reminders
+`main.py` runs three things in one asyncio process:
 
----
+1. **Channel publisher** (`fazkerbot.py`). An APScheduler instance in Cairo time. It fetches the day's prayer times from the Aladhan API, falls back to fixed times if the API fails, and schedules the athkar and fasting posts for the channel.
+2. **Personal bot** (`user_side_app/`). python-telegram-bot with long polling, and PostgreSQL through async SQLAlchemy for user settings and linked targets. At startup it builds one APScheduler job set per active user. A cron job at 00:05 rebuilds the one-off prayer jobs every day.
+3. **Health server**. An aiohttp app on `$PORT` (default 8080) that answers `GET /` with a status line.
 
-## Current Features
+Delivery to linked groups and channels runs from a dispatcher job (`user_side_app/community_dispatcher.py`) every minute. A post is due inside a three-minute window after its target time. The dispatcher records what it sent (a last-sent date per post type, and a `last_sent_key` for custom posts), so overlapping ticks and restarts do not double-post.
 
-### 📡 Channel Bot (fazkerbot.py)
-- **Automatic Daily Posts** to configured channel:
-  - 🌅 Morning Athkar (after Fajr prayer)
-  - 📖 Quran reading pages (2-3 pages daily on a continuous cycle)
-  - 🌙 Evening Athkar (after Asr prayer)
+External services:
 
-- **Smart Scheduling**:
-  - Fetches Cairo prayer times via Aladhan API
-  - Calculates prayer times for each day
-  - Schedules tasks based on actual prayer times (not fixed hours)
-  - Fallback times if API fails
-  - Tasks carry over to next day if missed
+- **Aladhan** for prayer times.
+- **OpenStreetMap Nominatim** to turn a city name into coordinates, and to label a shared location with a city.
+- **timezonefinder** to map shared coordinates to a timezone, with Open-Meteo and then Aladhan as fallbacks.
 
-### 💬 User Bot (user_side.py)
-Beautiful interactive interface where users can:
+## Run locally
 
-1. **Select Athkar** - Choose from 9 options with visual toggles:
-   - 🛡️ Al-Hizb (The Shield)
-   - ✨ Eternal Good Works
-   - 🤲 Hawqalah
-   - 📿 Tasbih (Glorification)
-   - 🌙 Dua of Dhun-Nun
-   - 📣 Tahlil (Declaration of Oneness)
-   - 🙏 Tahmid (Praise)
-   - 🔄 Istighfar (Repentance)
-   - 💌 Salat on the Prophet
+Requirements: Python 3.11, a PostgreSQL database, and a bot token from [@BotFather](https://t.me/BotFather).
 
-2. **Choose Frequency**:
-   - 1x daily (9:00 AM)
-   - 2x daily (9:00 AM, 6:00 PM)
-   - 3x daily (9:00 AM, 1:00 PM, 6:00 PM)
-
-3. **Manage Preferences**:
-   - View current settings
-   - Edit Athkar selections anytime
-   - Change reminder frequency
-   - All saved to database
-
-### 🗄️ Database
-- PostgreSQL on Heroku
-- Stores user preferences persistently
-- Tracks: telegram ID, selected Athkar, frequency, timezone, created/updated dates
-
----
-
-## How to Use
-
-### Users
-1. Open the bot and send `/start`
-2. Click "اختيار الأذكار" (Select Athkar)
-3. Toggle desired Athkar with checkmarks
-4. Click "تم" to proceed
-5. Choose frequency preference
-6. Done! Preferences saved to database
-
-Users will receive their personalized reminders based on their selections.
-
-### Admins
-- **Edit Channel**: Set `TELEGRAM_CHAT_ID` in Heroku config
-- **Edit Bot Token**: Update `TELEGRAM_BOT_TOKEN`
-- **Database**: Automatically managed on Heroku Postgres
-- **Logs**: View with `heroku logs -t -a muthaker-bot`
-
----
-
-## Architecture
-
-```
-main.py (Entry Point)
-├── Channel Bot (fazkerbot.py)
-│   ├── Fetch prayer times (Aladhan API)
-│   ├── Schedule daily tasks
-│   ├── Send Quran pages + Athkar to channel
-│   └── Heartbeat monitoring
-│
-├── User Bot (user_side.py)
-│   ├── /start command
-│   ├── Interactive menus (callbacks)
-│   ├── Database operations
-│   └── Webhook server
-│
-└── Web Server (aiohttp)
-    └── Telegram webhook receiver
+```sh
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -r requirements.txt "SQLAlchemy[asyncio]<2.1"
+cp .env.example .env             # then fill in the values
+set -a; source .env; set +a      # export the variables into your shell
+python main.py
 ```
 
----
+`main.py` reads `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` before any `.env` file would be loaded, so export the variables in your shell as shown. The `"SQLAlchemy[asyncio]<2.1"` pin is needed because `requirements.txt` does not cap SQLAlchemy and 2.1 switches the default `postgresql://` driver to psycopg, which is not listed there.
 
-## Environment Variables (Heroku)
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `TELEGRAM_BOT_TOKEN` | Yes | Bot token from BotFather |
+| `TELEGRAM_CHAT_ID` | Yes | Channel or chat that the channel publisher posts to |
+| `DATABASE_URL` | Yes | PostgreSQL URL. A `postgres://` URL, as Heroku sets it, is rewritten for asyncpg |
+| `PORT` | No | Port for the health server. Defaults to 8080 |
 
-```bash
-TELEGRAM_BOT_TOKEN=<your_bot_token>
-TELEGRAM_CHAT_ID=<your_channel_id>
-DATABASE_URL=<auto_set_by_heroku_postgres>
-PORT=<auto_set_by_heroku>
+## Deploy
+
+The app runs on Heroku as a single `web` dyno. The `Procfile` is `web: python main.py` and `.python-version` pins Python 3.11.
+
+```sh
+heroku addons:create heroku-postgresql          # sets DATABASE_URL
+heroku config:set TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=...
+git push heroku master
+heroku logs --tail
 ```
 
----
+Run one instance only. The personal bot uses long polling, so a second instance would compete for the same updates.
 
-## Logs & Monitoring
+Images for channel posts are loaded from `raw.githubusercontent.com/elsisiem/muthaker-bot/master/`. Keep the repository name and the `master` branch as they are, or update the URLs in `fazkerbot.py` and `config.py`.
 
-Clean, organized logs show:
-- ✅ Initialization of each component
-- 🔗 Telegram connection status
-- 📍 Prayer times API calls
-- 📅 Tasks scheduled (with times)
-- 💓 Heartbeat every 5 minutes
-- 💬 User interactions
+## Project layout
 
-Example:
+```text
+main.py              Entry point: starts the three services
+fazkerbot.py         Channel publisher (prayer-time athkar images, fasting reminders)
+user_side_app/       Personal bot and community dispatcher
+  app.py             Telegram application, command and callback registration, health route
+  handlers.py        Menus and setup flows
+  db.py              SQLAlchemy models and queries
+  scheduler.py       APScheduler jobs for reminders and daily rebuild
+  community_dispatcher.py   One-minute loop for linked groups and channels
+  i18n.py, keyboards.py     Five-language strings and inline keyboards
+الأذكار/ الصيام/ المصحف/     Images served to channels from GitHub
+services/, database/, config.py   Loaded at startup through services.timezone_service
+bot.py, handlers/, keyboards.py, i18n/   Separate modular bot, not started by main.py
+user_side.py, archive/       Compatibility shim and retired scripts
 ```
-📡 Starting channel posting bot...
-✅ Channel bot task created
-🌐 Starting web server for Telegram webhook...
-📦 Initializing user preferences database...
-✅ All components started successfully
-```
 
----
+`bot.py` with `handlers/`, the root `keyboards.py` and `i18n/` form a second implementation that `main.py` does not import. `user_side_app/handlers.py` imports `services.timezone_service`, which loads the `services/` and `database/` packages and `config.py` at startup, so those stay in place.
 
-## Recent Changes
+## License
 
-✅ **Cleanup**:
-- Removed all test files and unused directories
-- Cleaned up requirements.txt
-- Fixed imports and dependencies
-
-✅ **Clean Logging**:
-- Structured startup sequence
-- Reduced noise from third-party libraries
-- Clear status indicators with emojis
-
-✅ **New User Interface**:
-- Complete rewrite of user_side.py
-- Beautiful Arabic/English UI
-- Interactive Athkar selection with toggles
-- Frequency options
-- Preferences persisted to database
-
----
-
-## Tech Stack
-
-- **Python 3.11** - Core language
-- **python-telegram-bot** - Telegram API
-- **APScheduler** - Task scheduling
-- **SQLAlchemy** - ORM for database
-- **AsyncPG** - Async database driver
-- **aiohttp** - Async web server
-- **pytz** - Timezone handling
-- **Heroku** - Hosting platform
-- **PostgreSQL** - Database
-
----
-
-## Next Steps (Optional)
-
-- [ ] Implement personalized reminder sending to users
-- [ ] Add timezone selection for users
-- [ ] Create web dashboard for admin management
-- [ ] Add custom time slot selection
-- [ ] Multi-language support enhancements
-- [ ] Admin notifications for new users
-
----
-
-**Last Updated**: April 1, 2026
-**Status**: Production ✅
+MIT. See [LICENSE](LICENSE).
