@@ -19,19 +19,19 @@ API_PARAMS = {'city': 'Cairo', 'country': 'Egypt', 'method': 3}
 # Image URLs for channel posts
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/elsisiem/muthaker-bot/master"
 ATHKAR_URL = f"{GITHUB_RAW_URL}/%D8%A7%D9%84%D8%A3%D8%B0%D9%83%D8%A7%D8%B1"
-FASTING_IMAGES_DIR = os.path.join(os.path.dirname(__file__), "??????")
+FASTING_IMAGES_DIR = os.path.join(os.path.dirname(__file__), "الصيام")
 
 # Weekly fasting reminders: Sunday -> Monday fast, Wednesday -> Thursday fast
 FASTING_REMINDER_CONFIG = {
     6: {
         "job_key": "monday",
-        "image": "???? ???????.jpg",
-        "caption": "#????_???????",
+        "image": "صيام الإثنين.jpg",
+        "caption": "#صيام_الإثنين",
     },
     2: {
         "job_key": "thursday",
-        "image": "???? ??????.jpg",
-        "caption": "#????_??????",
+        "image": "صيام الخميس.jpg",
+        "caption": "#صيام_الخميس",
     },
 }
 
@@ -212,7 +212,7 @@ async def send_athkar(athkar_type):
     logger.info(f"Sending {athkar_type} Athkar")
 
     caption = None
-    image_url = f"{ATHKAR_URL}/{'?????_??????' if athkar_type == 'morning' else '?????_??????'}.jpg"
+    image_url = f"{ATHKAR_URL}/{'أذكار_الصباح' if athkar_type == 'morning' else 'أذكار_المساء'}.jpg"
 
     try:
         async with aiohttp.ClientSession() as session:
