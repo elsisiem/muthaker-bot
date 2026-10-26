@@ -53,13 +53,13 @@ Requirements: Python 3.11, a PostgreSQL database, and a bot token from [@BotFath
 ```sh
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -r requirements.txt "SQLAlchemy[asyncio]<2.1"
+pip install -r requirements.txt
 cp .env.example .env             # then fill in the values
 set -a; source .env; set +a      # export the variables into your shell
 python main.py
 ```
 
-`main.py` reads `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` before any `.env` file would be loaded, so export the variables in your shell as shown. The `"SQLAlchemy[asyncio]<2.1"` pin is needed because `requirements.txt` does not cap SQLAlchemy and 2.1 switches the default `postgresql://` driver to psycopg, which is not listed there.
+`main.py` reads `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` before any `.env` file would be loaded, so export the variables in your shell as shown. SQLAlchemy is capped below 2.1 because 2.1 switches the default `postgresql://` driver to psycopg.
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
